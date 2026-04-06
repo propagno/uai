@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>UAI — Unidade de Análise Inteligente</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cobol.min.js"></script>
   <style>
     /* ── Reset & base ───────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -683,6 +686,184 @@
       font-size: 10px;
       color: var(--text2);
     }
+
+    /* ── Source expand button ──────────────────────────────────────── */
+    .src-expand-btn {
+      background: var(--surface3);
+      border: 1px solid var(--border2);
+      color: var(--text2);
+      border-radius: var(--radius-sm);
+      padding: 2px 8px;
+      font-size: 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .src-expand-btn:hover { background: var(--accent-bg); border-color: rgba(99,102,241,0.4); color: var(--accent2); }
+
+    .source-preview-mini {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px 10px;
+      font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+      font-size: 9.5px;
+      color: var(--text3);
+      height: 80px;
+      overflow: hidden;
+      white-space: pre;
+      line-height: 1.5;
+      position: relative;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .source-preview-mini:hover { border-color: var(--border2); }
+    .source-preview-mini::after {
+      content: '';
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 36px;
+      background: linear-gradient(transparent, var(--bg));
+      pointer-events: none;
+    }
+
+    /* ── Source modal ──────────────────────────────────────────────── */
+    #src-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    #src-modal.hidden { display: none; }
+
+    #src-modal-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.72);
+      backdrop-filter: blur(4px);
+    }
+
+    #src-modal-dialog {
+      position: relative;
+      width: 92%;
+      max-width: 1100px;
+      height: 88vh;
+      background: #1a1d2e;
+      border: 1px solid var(--border2);
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.7);
+      overflow: hidden;
+    }
+
+    #src-modal-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+      background: #141728;
+    }
+
+    #src-modal-lang {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      padding: 2px 8px;
+      border-radius: 99px;
+      background: rgba(99,102,241,0.15);
+      color: var(--accent2);
+      border: 1px solid rgba(99,102,241,0.3);
+      flex-shrink: 0;
+    }
+
+    #src-modal-fname {
+      flex: 1;
+      font-size: 12px;
+      color: var(--text2);
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .src-modal-btn {
+      background: var(--surface3);
+      border: 1px solid var(--border2);
+      color: var(--text2);
+      border-radius: var(--radius-sm);
+      padding: 4px 10px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+    .src-modal-btn:hover { background: var(--accent-bg); color: var(--accent2); border-color: rgba(99,102,241,0.4); }
+    .src-modal-btn.close:hover { background: rgba(248,113,113,0.12); color: #f87171; border-color: rgba(248,113,113,0.3); }
+
+    #src-modal-body {
+      flex: 1;
+      overflow: auto;
+      padding: 0;
+    }
+
+    #src-modal-pre {
+      margin: 0;
+      padding: 16px 0;
+      background: transparent !important;
+      font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace !important;
+      font-size: 12.5px !important;
+      line-height: 1.65 !important;
+      tab-size: 4;
+      counter-reset: srcline;
+    }
+
+    #src-modal-pre code {
+      background: transparent !important;
+      padding: 0 !important;
+    }
+
+    .src-ln {
+      display: block;
+      counter-increment: srcline;
+      padding: 0 20px 0 0;
+      transition: background 0.1s;
+    }
+    .src-ln:hover { background: rgba(255,255,255,0.03); }
+
+    .src-ln::before {
+      content: counter(srcline);
+      display: inline-block;
+      width: 3.8em;
+      text-align: right;
+      padding-right: 1.5em;
+      color: #3d4560;
+      user-select: none;
+      font-style: normal;
+      border-right: 1px solid #1e2440;
+      margin-right: 1.5em;
+      font-size: 11px;
+    }
+
+    #src-copy-ok {
+      font-size: 10px;
+      color: #34d399;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+    }
+    #src-copy-ok.show { opacity: 1; }
   </style>
 </head>
 <body>
@@ -846,6 +1027,23 @@
   </div>
 
 </aside>
+
+<!-- ── Source code modal ─────────────────────────────────────────── -->
+<div id="src-modal" class="hidden">
+  <div id="src-modal-backdrop"></div>
+  <div id="src-modal-dialog">
+    <div id="src-modal-header">
+      <span id="src-modal-lang">—</span>
+      <span id="src-modal-fname">—</span>
+      <span id="src-copy-ok">✓ copiado</span>
+      <button class="src-modal-btn" id="src-copy-btn">⎘ Copiar</button>
+      <button class="src-modal-btn close" id="src-modal-close">✕</button>
+    </div>
+    <div id="src-modal-body">
+      <pre id="src-modal-pre"><code id="src-modal-code"></code></pre>
+    </div>
+  </div>
+</div>
 
 <script>
 'use strict';
@@ -1292,10 +1490,15 @@ function renderDetailFull(container, nodeData, res) {
 
   // Source
   if (res.source) {
+    _srcModal = { source: res.source, filename: nodeData.file || '' };
+    const preview = esc(res.source.slice(0, 600));
     parts.push(`
       <div class="dp-section">
-        <div class="dp-section-title">Código-fonte (200 linhas)</div>
-        <div class="source-preview">${esc(res.source.slice(0, 4000))}</div>
+        <div class="dp-section-title" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Código-fonte</span>
+          <button class="src-expand-btn" onclick="openSourceModal()">⤢ Expandir</button>
+        </div>
+        <div class="source-preview-mini" onclick="openSourceModal()" title="Clique para expandir">${preview}</div>
       </div>`);
   }
 
@@ -1522,6 +1725,65 @@ function esc(s) {
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Source modal
+═══════════════════════════════════════════════════════════════════ */
+let _srcModal = null;
+
+function detectLang(filename) {
+  const ext = (filename || '').split('.').pop().toLowerCase();
+  return { cbl:'cobol', cob:'cobol', cpy:'cobol', cobol:'cobol',
+           sql:'sql',
+           frm:'vbnet', cls:'vbnet', bas:'vbnet', vbp:'vbnet' }[ext] || 'plaintext';
+}
+
+function openSourceModal() {
+  if (!_srcModal) return;
+  const { source, filename } = _srcModal;
+  const lang = detectLang(filename);
+
+  document.getElementById('src-modal-lang').textContent = lang.toUpperCase();
+  document.getElementById('src-modal-fname').textContent = filename || 'código-fonte';
+
+  const codeEl = document.getElementById('src-modal-code');
+  codeEl.removeAttribute('data-highlighted');
+  codeEl.className = `language-${lang}`;
+  codeEl.textContent = source;
+
+  if (window.hljs) {
+    hljs.highlightElement(codeEl);
+    // Wrap lines for line numbers
+    const lines = codeEl.innerHTML.split('\n');
+    codeEl.innerHTML = lines.map(l => `<span class="src-ln">${l}</span>`).join('\n');
+  }
+
+  document.getElementById('src-modal').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeSourceModal() {
+  document.getElementById('src-modal').classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+document.getElementById('src-modal-backdrop').addEventListener('click', closeSourceModal);
+document.getElementById('src-modal-close').addEventListener('click', closeSourceModal);
+
+document.getElementById('src-copy-btn').addEventListener('click', () => {
+  if (!_srcModal) return;
+  navigator.clipboard.writeText(_srcModal.source).then(() => {
+    const ok = document.getElementById('src-copy-ok');
+    ok.classList.add('show');
+    setTimeout(() => ok.classList.remove('show'), 1800);
+  });
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !document.getElementById('src-modal').classList.contains('hidden')) {
+    closeSourceModal();
+  }
+});
 
 /* ═══════════════════════════════════════════════════════════════════
    Init
