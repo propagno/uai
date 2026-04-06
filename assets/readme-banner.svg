@@ -39,5 +39,5 @@
   <text x="460" y="102" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="78" font-weight="800" fill="url(#uai-accent)" letter-spacing="0.16em">UAI</text>
   <text x="460" y="142" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="18" font-weight="600" fill="#e6edf3">Unidade de Analise Inteligente</text>
   <text x="460" y="170" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="16" fill="#9fb3c8">Model-Driven · Analysis-Driven · Reverse Engineering</text>
-  <text x="460" y="196" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="13" fill="#7dd3fc">npm install -g uai-cc && uai-cc install --all-agents</text>
+  <text x="460" y="196" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="13" fill="#7dd3fc">npm install -g uai-cc &amp;&amp; uai-cc install --all-agents</text>
 </svg>
