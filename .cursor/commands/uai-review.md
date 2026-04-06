@@ -1,3 +1,7 @@
+---
+description: "Consolida revisão humana sobre o modelo UAI e gera relatório de validação."
+---
+Consolida revisão humana sobre o modelo UAI e gera relatório de validação.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: commands/uai/uai-review.md
 # /uai-review

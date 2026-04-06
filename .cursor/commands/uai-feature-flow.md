@@ -1,3 +1,7 @@
+---
+description: "Reconstrói o fluxo de uma funcionalidade como dossie autonomo, usando o comando central de analise do UAI."
+---
+Reconstrói o fluxo de uma funcionalidade como dossie autonomo, usando o comando central de analise do UAI.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: workflows/uai-feature-flow.md
 # /uai-feature-flow

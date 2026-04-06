@@ -1,3 +1,7 @@
+---
+description: "Varre fontes, classifica artefatos e extrai entidades brutas para o inventário."
+---
+Varre fontes, classifica artefatos e extrai entidades brutas para o inventário.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: commands/uai/uai-ingest.md
 # /uai-ingest

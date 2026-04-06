@@ -9,6 +9,9 @@ program
   .description('UAI — Unidade de Analise Inteligente\nFramework de reverse engineering para sistemas legados')
   .version(pkg.version);
 
+program.addCommand(require('../src/commands/install'));
+program.addCommand(require('../src/commands/uninstall'));
+
 // Pipeline principal
 program.addCommand(require('../src/commands/init'));
 program.addCommand(require('../src/commands/ingest'));
@@ -36,5 +39,9 @@ program.addCommand(require('../src/commands/serve'));
 program.addCommand(require('../src/commands/obs'));
 program.addCommand(require('../src/commands/diff'));
 program.addCommand(require('../src/commands/review'));
+
+if (process.argv.length <= 2) {
+  program.help();
+}
 
 program.parse(process.argv);

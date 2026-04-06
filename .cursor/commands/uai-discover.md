@@ -1,3 +1,7 @@
+---
+description: "Executa o pipeline principal de descoberta do UAI, do workspace até a verificação."
+---
+Executa o pipeline principal de descoberta do UAI, do workspace até a verificação.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: workflows/uai-discover.md
 # /uai-discover

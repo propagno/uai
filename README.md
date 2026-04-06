@@ -1,51 +1,119 @@
-# UAI — Unidade de Analise Inteligente
+<div align="center">
 
-Framework de reverse engineering para sistemas legados: COBOL, JCL, copybooks, VB6, SQL/DB2.
+# UAI
 
-O UAI converte codigo-fonte legado em um **modelo navegavel de entidades e relacoes**,
-permitindo que analistas respondam perguntas de impacto, lineage e cobertura sem ler
-milhares de arquivos manualmente.
+### Unidade de Analise Inteligente
 
-O produto evoluiu para um motor de **dossie autonomo de funcionalidade**, orientado por:
+**Model-Driven + Analysis-Driven + Reverse Engineering** para sistemas legados COBOL, JCL, copybooks, VB6, SQL e DB2.
+
+Descoberta automatica de aplicacoes, dependency mapping, deep search, data lineage e dossie autonomo de funcionalidade para entendimento, auditoria e modernizacao.
+
+**Funciona em Windows, Linux e macOS.**
+
+[![npm version](https://img.shields.io/npm/v/uai-cc?style=for-the-badge&label=npm)](https://www.npmjs.com/package/uai-cc)
+[![downloads](https://img.shields.io/npm/dm/uai-cc?style=for-the-badge&label=downloads)](https://www.npmjs.com/package/uai-cc)
+[![tests](https://img.shields.io/github/actions/workflow/status/propagno/uai/ci.yml?style=for-the-badge&label=tests)](https://github.com/propagno/uai/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/uai-cc?style=for-the-badge&label=license)](https://github.com/propagno/uai/blob/main/LICENSE)
+[![node](https://img.shields.io/node/v/uai-cc?style=for-the-badge&label=node)](https://www.npmjs.com/package/uai-cc)
+[![agents](https://img.shields.io/badge/agents-Cursor%20%7C%20Claude%20%7C%20Codex%20%7C%20Copilot-2563eb?style=for-the-badge)](https://github.com/propagno/uai)
+
+</div>
+
+```bash
+npm install -g uai-cc
+uai-cc install --all-agents
+```
+
+```text
+PS C:\> npm install -g uai-cc
+PS C:\> uai-cc install --all-agents
+
+Installed commands:
+  /uai-init
+  /uai-ingest
+  /uai-model
+  /uai-map
+  /uai-analyze
+  /uai-doc
+  /uai-executive
+  /uai-verify
+
+Next:
+  uai-cc init --name MEUSIS --source C:\legado
+```
+
+O UAI converte codigo-fonte legado em um **modelo navegavel de entidades e relacoes** e,
+na camada mais alta, em um **dossie autonomo de funcionalidade** com fases, handoffs,
+persistencia, saida, gaps e citacoes auditaveis.
+
+O produto trabalha em tres eixos:
 - `Model-Driven` — o legado vira um grafo consultavel e reexecutavel
 - `Analysis-Driven` — a analise passa a ser guiada por fluxo funcional, nao so por arquivo
-- `Reverse Engineering` — o pacote final reconstrui fases, handoffs, persistencia, saida e gaps
+- `Reverse Engineering` — o pacote final reconstrui comportamento, dados, dependencias e riscos
 
-O `analyze` agora trabalha no modo **feature-first** e gera um pacote com:
+O `analyze` opera em modo **feature-first** e gera um pacote com:
 - resolucao funcional por cluster, fluxo, entrypoint e terminais de negocio
 - fases semanticas em vez de uma lista crua de `STEP01`, `STEP02`, ...
 - claims classificados em `fact`, `inference` e `hypothesis`
 - citacoes navegaveis por arquivo, linha e extrator
 - quality gate que bloqueia `complete` quando faltam fatos criticos
 
-Isso posiciona o UAI para discovery, entendimento funcional, auditoria e modernizacao com
-mais rastreabilidade e menos trabalho manual.
+Mapa rapido do framework:
 
-```
-uai-cc init      → workspace
-uai-cc ingest    → inventario + extracao
-uai-cc model     → modelo canonico
-uai-cc map       → grafos e mapas
-uai-cc analyze   → dossie autonomo
-uai-cc search    → busca
-uai-cc impact    → analise de impacto
-uai-cc lineage   → rastreio de dados
-uai-cc doc       → documentacao
-uai-cc executive → visao executiva
-uai-cc verify    → cobertura e qualidade
-uai-cc serve     → interface web
-uai-cc sync-commands → gera adapters /comandos para agentes
+```text
+uai-cc init           -> workspace
+uai-cc ingest         -> inventario + extracao
+uai-cc model          -> modelo canonico
+uai-cc map            -> grafos e mapas
+uai-cc analyze        -> dossie autonomo
+uai-cc search         -> busca
+uai-cc impact         -> analise de impacto
+uai-cc lineage        -> rastreio de dados
+uai-cc doc            -> documentacao
+uai-cc executive      -> visao executiva
+uai-cc verify         -> cobertura e qualidade
+uai-cc serve          -> interface web
+uai-cc sync-commands  -> gera adapters e comandos para agentes
+uai-cc install        -> instala comandos/skills nos agentes
 ```
 
 ---
 
 ## Instalacao
 
+Requisito: **Node.js >= 22**
+
+O `npm install -g uai-cc` instala o **CLI**.
+Para instalar os comandos/skills dos agentes, rode depois:
+
 ```bash
-npm install -g uai-cc   # ou: node bin/uai-cc.js <comando>
+uai-cc install --all-agents
 ```
 
-Requisito: **Node.js >= 22**
+Perfis comuns:
+
+```bash
+# instala no HOME do usuario para Cursor, Claude e Codex
+uai-cc install
+
+# instala explicitamente para todos os agentes suportados
+uai-cc install --all-agents
+
+# instala apenas para Cursor e Claude
+uai-cc install --cursor --claude
+
+# instala no projeto atual, e nao no HOME do usuario
+uai-cc install --cursor --ide-local --dir .
+
+# remove os artefatos instalados pelo UAI
+uai-cc uninstall
+```
+
+Agentes suportados pelo instalador:
+- Cursor
+- Claude
+- Copilot CLI
+- Codex
 
 ---
 

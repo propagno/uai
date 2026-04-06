@@ -1,3 +1,7 @@
+---
+description: "Extrai e visualiza o fluxo interno de programas COBOL a partir da Procedure Division."
+---
+Extrai e visualiza o fluxo interno de programas COBOL a partir da Procedure Division.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: commands/uai/uai-flow.md
 # /uai-flow

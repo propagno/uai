@@ -1,3 +1,7 @@
+---
+description: "Atualiza documentação e cobertura do workspace UAI em sequência fixa."
+---
+Atualiza documentação e cobertura do workspace UAI em sequência fixa.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: workflows/uai-refresh-docs.md
 # /uai-refresh-docs

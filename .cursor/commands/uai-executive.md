@@ -1,3 +1,7 @@
+---
+description: "Gera uma visao executiva do sistema ou de um recorte especifico em Markdown com Mermaid e Structurizr DSL."
+---
+Gera uma visao executiva do sistema ou de um recorte especifico em Markdown com Mermaid e Structurizr DSL.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: commands/uai/uai-executive.md
 # /uai-executive

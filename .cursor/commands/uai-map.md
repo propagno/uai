@@ -1,3 +1,7 @@
+---
+description: "Gera mapas navegáveis de chamadas, batch flow e dependências de dados."
+---
+Gera mapas navegáveis de chamadas, batch flow e dependências de dados.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: commands/uai/uai-map.md
 # /uai-map

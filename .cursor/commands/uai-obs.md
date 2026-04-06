@@ -1,3 +1,7 @@
+---
+description: "Registra observações humanas, flags e correções no workspace do UAI."
+---
+Registra observações humanas, flags e correções no workspace do UAI.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: commands/uai/uai-obs.md
 # /uai-obs

@@ -1,3 +1,7 @@
+---
+description: "Gera documentação técnica e funcional derivada do modelo UAI."
+---
+Gera documentação técnica e funcional derivada do modelo UAI.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: commands/uai/uai-doc.md
 # /uai-doc

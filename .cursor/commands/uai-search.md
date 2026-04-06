@@ -1,3 +1,7 @@
+---
+description: "Busca entidades e relações no modelo canônico por nome, label, ID ou tipo."
+---
+Busca entidades e relações no modelo canônico por nome, label, ID ou tipo.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: commands/uai/uai-search.md
 # /uai-search

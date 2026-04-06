@@ -1,3 +1,7 @@
+---
+description: "Consolida impacto estrutural e qualidade do modelo para um artefato ou mudança proposta."
+---
+Consolida impacto estrutural e qualidade do modelo para um artefato ou mudança proposta.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: workflows/uai-impact-check.md
 # /uai-impact-check

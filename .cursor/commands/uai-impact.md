@@ -1,3 +1,7 @@
+---
+description: "Analisa impacto upstream e downstream de um artefato no modelo UAI."
+---
+Analisa impacto upstream e downstream de um artefato no modelo UAI.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: commands/uai/uai-impact.md
 # /uai-impact

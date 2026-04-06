@@ -1,3 +1,7 @@
+---
+description: "Compara dois snapshots do modelo UAI para identificar mudanças em entidades e relações."
+---
+Compara dois snapshots do modelo UAI para identificar mudanças em entidades e relações.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: commands/uai/uai-diff.md
 # /uai-diff

@@ -93,9 +93,14 @@ test('syncCommandAdapters generates repo-local adapters for all targets and is i
   assert.equal(secondRun.ok, true);
   assert.deepEqual(secondRun.driftFiles, []);
 
-  const cursorCommand = path.join(tempRoot, '.cursor', 'commands', 'uai-discover.md');
-  const original = fs.readFileSync(cursorCommand, 'utf-8');
-  fs.writeFileSync(cursorCommand, `${original}\nDRIFT\n`);
+  const cursorCommand = path.join(tempRoot, '.cursor', 'commands', 'uai-doc.md');
+  const cursorContent = fs.readFileSync(cursorCommand, 'utf-8');
+  assert.match(cursorContent, /^---\ndescription:\s+/);
+  assert.ok(!cursorContent.startsWith('# GENERATED FILE'));
+
+  const driftCommand = path.join(tempRoot, '.cursor', 'commands', 'uai-discover.md');
+  const original = fs.readFileSync(driftCommand, 'utf-8');
+  fs.writeFileSync(driftCommand, `${original}\nDRIFT\n`);
 
   const driftRun = syncCommandAdapters({ rootDir: tempRoot, check: true });
   assert.equal(driftRun.ok, false);

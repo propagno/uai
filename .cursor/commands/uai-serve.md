@@ -1,3 +1,7 @@
+---
+description: "Inicia a interface web do UAI com o modelo atual do workspace."
+---
+Inicia a interface web do UAI com o modelo atual do workspace.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: commands/uai/uai-serve.md
 # /uai-serve

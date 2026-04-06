@@ -103,7 +103,15 @@ function renderSkill(spec, platform) {
 }
 
 function renderCursorCommand(spec) {
+  const description = spec.description || `Comando UAI ${spec.id}`;
+  const summaryLine = description.trim() ? `${description.trim()}\n\n` : '';
   return [
+    '---',
+    `description: ${JSON.stringify(description)}`,
+    '---',
+    '',
+    summaryLine.trimEnd(),
+    '',
     '# GENERATED FILE - DO NOT EDIT MANUALLY',
     `# Source: ${spec.sourcePath}`,
     '',

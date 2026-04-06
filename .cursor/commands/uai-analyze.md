@@ -1,3 +1,7 @@
+---
+description: "Gera um dossie autonomo de funcionalidade com foco em fluxo, fases, evidencias, gaps e diagramas."
+---
+Gera um dossie autonomo de funcionalidade com foco em fluxo, fases, evidencias, gaps e diagramas.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: commands/uai/uai-analyze.md
 # /uai-analyze

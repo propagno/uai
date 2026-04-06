@@ -1,3 +1,7 @@
+---
+description: "Normaliza entidades extraídas e constrói o modelo canônico do UAI."
+---
+Normaliza entidades extraídas e constrói o modelo canônico do UAI.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: commands/uai/uai-model.md
 # /uai-model

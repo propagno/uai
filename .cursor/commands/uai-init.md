@@ -1,3 +1,7 @@
+---
+description: "Inicializa o workspace .uai para um sistema legado."
+---
+Inicializa o workspace .uai para um sistema legado.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: commands/uai/uai-init.md
 # /uai-init

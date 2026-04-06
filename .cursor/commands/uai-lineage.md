@@ -1,3 +1,7 @@
+---
+description: "Rastreia lineage de campo, copybook, tabela ou procedure a partir do modelo UAI."
+---
+Rastreia lineage de campo, copybook, tabela ou procedure a partir do modelo UAI.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: commands/uai/uai-lineage.md
 # /uai-lineage

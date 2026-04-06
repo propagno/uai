@@ -1,3 +1,7 @@
+---
+description: "Exporta o modelo UAI para GraphML, DOT ou CSV para consumo externo."
+---
+Exporta o modelo UAI para GraphML, DOT ou CSV para consumo externo.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: commands/uai/uai-export.md
 # /uai-export

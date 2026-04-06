@@ -1,3 +1,7 @@
+---
+description: "Mede cobertura, confiança e lacunas do modelo UAI."
+---
+Mede cobertura, confiança e lacunas do modelo UAI.
 # GENERATED FILE - DO NOT EDIT MANUALLY
 # Source: commands/uai/uai-verify.md
 # /uai-verify
