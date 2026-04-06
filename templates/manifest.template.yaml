@@ -1,0 +1,26 @@
+system_name: ""
+description: ""
+version: "1"
+analysis_scope:
+  include_paths: []
+  exclude_globs:
+    - "node_modules/**"
+    - ".git/**"
+    - ".uai/**"
+  encoding: latin1
+dialects:
+  cobol: true
+  jcl: true
+  copybook: true
+  sql: true
+  vb6: true
+naming_conventions:
+  working_storage_prefix: "WRK-"
+  linkage_prefix: "LNK-"
+  error_prefix: "ERR-"
+  program_pattern: "[A-Z]{4}[0-9]{4}"
+persistence:
+  engine: sqlite
+  path: ".uai/uai.db"
+created_at: ""
+updated_at: ""

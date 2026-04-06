@@ -1,0 +1,17 @@
+profile: legacy
+incremental: true
+extraction_confidence_threshold: 0.5
+log_level: info
+max_file_size_mb: 10
+encoding: latin1
+include_paths: []
+exclude_globs:
+  - "node_modules/**"
+  - ".git/**"
+  - ".uai/**"
+dialects:
+  cobol: true
+  jcl: true
+  copybook: true
+  sql: true
+  vb6: true
