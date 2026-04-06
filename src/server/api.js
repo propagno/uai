@@ -6,6 +6,7 @@ const url     = require('url');
 const manifest = require('../utils/manifest');
 const sourceMap = require('../utils/source-map');
 const entityIdx = require('../model/entity-index');
+const graph     = require('../model/graph');
 
 /**
  * REST API handler for UAI web UI.
@@ -234,6 +235,60 @@ function handleStats() {
   };
 }
 
+function handleNeighborhood(name, query) {
+  const depth     = Math.min(parseInt(query.depth || '1', 10) || 1, 4);
+  const direction = ['upstream', 'downstream', 'both'].includes(query.direction) ? query.direction : 'both';
+  const relTypes  = query.rel ? new Set(query.rel.split(',')) : null;
+  const minConf   = parseFloat(query.minConf || '0') || 0;
+
+  const entities   = loadEntities();
+  const relations  = loadRelations();
+  const entityById = new Map(entities.map(e => [e.id, e]));
+
+  const index = entityIdx.buildEntityIndex(entities);
+  const seed  = entityIdx.getEntity(index, name) || entityIdx.getEntity(index, name.toUpperCase());
+  if (!seed) return null;
+
+  const relIndex  = graph.buildIndex(relations);
+  const traversal = graph.traverse([seed.id, seed.name], relIndex, direction, depth, 5000);
+
+  const nodes = new Map();
+  const edges = new Map();
+  nodes.set(seed.id, seed);
+
+  for (const rel of traversal) {
+    if (relTypes && !relTypes.has(rel.rel)) continue;
+    if ((rel.confidence || 0) < minConf) continue;
+
+    const fId    = rel.from_id || rel.from;
+    const tId    = rel.to_id   || rel.to;
+    const edgeKey = `${fId}:${tId}:${rel.rel}`;
+    if (!edges.has(edgeKey)) {
+      edges.set(edgeKey, { source: fId, target: tId, rel: rel.rel, confidence: rel.confidence });
+    }
+    if (!nodes.has(fId) && entityById.has(fId)) nodes.set(fId, entityById.get(fId));
+    if (!nodes.has(tId) && entityById.has(tId)) nodes.set(tId, entityById.get(tId));
+  }
+
+  const nodeArr = [...nodes.values()].map(e => ({
+    id:         e.id,
+    label:      e.label || e.name,
+    name:       e.name,
+    type:       e.type,
+    file:       (e.files && e.files[0]) || null,
+    confidence: e.confidence,
+    inferred:   e.inferred || false,
+    seed:       e.id === seed.id,
+  }));
+
+  return {
+    seed:  { id: seed.id, label: seed.label || seed.name, type: seed.type },
+    nodes: nodeArr,
+    edges: [...edges.values()],
+    stats: { nodes: nodeArr.length, edges: edges.size, depth },
+  };
+}
+
 // ── Main dispatcher ────────────────────────────────────────────────────────
 
 function handle(req, res) {
@@ -280,6 +335,13 @@ function handle(req, res) {
     const batchMatch = pathname.match(/^\/api\/batch\/([^/]+)$/);
     if (batchMatch) {
       const result = handleBatch(decodeURIComponent(batchMatch[1]));
+      return result ? json(result) : json({ error: 'Not found' }, 404);
+    }
+
+    // /api/neighborhood/:name
+    const nbMatch = pathname.match(/^\/api\/neighborhood\/([^/]+)$/);
+    if (nbMatch) {
+      const result = handleNeighborhood(decodeURIComponent(nbMatch[1]), query);
       return result ? json(result) : json({ error: 'Not found' }, 404);
     }
 

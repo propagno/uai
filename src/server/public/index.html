@@ -367,6 +367,20 @@
     .search-item .si-name { flex: 1; color: var(--text); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .search-item .si-type { color: var(--text3); font-size: 10px; flex-shrink: 0; }
 
+    .si-nb-btn {
+      background: none; border: none; color: var(--text3); cursor: pointer;
+      font-size: 13px; padding: 2px 5px; border-radius: 3px; flex-shrink: 0;
+      transition: color 0.1s, background 0.1s; line-height: 1;
+    }
+    .si-nb-btn:hover { color: var(--accent2); background: var(--accent-bg); }
+
+    .dp-nb-btn {
+      background: var(--accent-bg); border: 1px solid rgba(99,102,241,0.3);
+      color: var(--accent2); border-radius: 99px; padding: 2px 10px;
+      font-size: 10px; font-weight: 600; cursor: pointer; transition: background 0.15s;
+    }
+    .dp-nb-btn:hover { background: rgba(99,102,241,0.22); }
+
     .tb-btn {
       background: var(--surface2);
       border: 1px solid var(--border);
@@ -765,6 +779,19 @@
     <button class="tb-btn" id="btn-cose" title="Layout COSE force-directed">⟡ Layout</button>
     <button class="tb-btn" id="btn-export" title="Exportar SVG">↓ SVG</button>
     <button class="tb-btn" id="btn-kbd" title="Atalhos">? Ajuda</button>
+
+    <div id="nb-mode-badge" style="display:none; align-items:center; gap:6px;
+      background:rgba(99,102,241,0.15); border:1px solid rgba(99,102,241,0.35);
+      border-radius:5px; padding:4px 10px; font-size:11px; color:#818cf8; white-space:nowrap">
+      <span id="nb-badge-label">⬡ Foco: —</span>
+      <select id="nb-depth-select" style="background:#0e1120;border:none;color:#818cf8;font-size:11px;outline:none;cursor:pointer">
+        <option value="1">1 hop</option>
+        <option value="2">2 hops</option>
+        <option value="3">3 hops</option>
+        <option value="4">4 hops</option>
+      </select>
+      <button onclick="clearFocus()" style="background:none;border:none;color:#f87171;cursor:pointer;font-size:13px;padding:0" title="Limpar foco">✕</button>
+    </div>
   </div>
 
   <div id="cy"></div>
@@ -917,6 +944,9 @@ document.getElementById('toggle-all-rels').addEventListener('click', () => {
    Cytoscape
 ═══════════════════════════════════════════════════════════════════ */
 let cy = null;
+let viewMode   = 'full';        // 'full' | 'neighborhood'
+let seedNodeId = null;
+let nbDepth    = 1;
 
 function initCy(elements, layoutName = 'grid') {
   if (cy) cy.destroy();
@@ -987,6 +1017,15 @@ function initCy(elements, layoutName = 'grid') {
       {
         selector: 'edge.highlighted',
         style: { 'opacity': 1, 'width': 2 },
+      },
+      {
+        selector: 'node[?seed]',
+        style: {
+          'border-width': 3,
+          'border-color': '#ffffff',
+          'border-style': 'solid',
+          'z-index':      20,
+        },
       },
     ],
     layout: layoutName === 'cose'
@@ -1078,6 +1117,77 @@ async function loadGraph() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+   Neighborhood view
+═══════════════════════════════════════════════════════════════════ */
+async function loadNeighborhood(id, depth) {
+  if (depth === undefined) depth = nbDepth;
+  seedNodeId = id;
+  nbDepth    = depth;
+  viewMode   = 'neighborhood';
+
+  const rels    = getChipValues('rel-chips');
+  const minConf = document.getElementById('filter-conf').value;
+  const params  = new URLSearchParams({ depth, direction: 'both', rel: rels.join(','), minConf });
+
+  showLoading(true, `Vizinhança de ${id}…`);
+  try {
+    const data = await fetch(`/api/neighborhood/${encodeURIComponent(id)}?${params}`).then(r => r.json());
+    if (!data || data.error) { showError('Não encontrado: ' + id); return; }
+
+    const elements = [
+      ...data.nodes.map(n => ({
+        data: { id: n.id, label: n.label || n.name, type: n.type, file: n.file,
+                confidence: n.confidence, inferred: n.inferred, seed: n.seed || false },
+      })),
+      ...data.edges.map(e => ({
+        data: { source: e.source, target: e.target, rel: e.rel, confidence: e.confidence },
+      })),
+    ];
+
+    initCy(elements, data.nodes.length <= 80 ? 'cose' : 'grid');
+
+    const seedEle = cy.$(`#${CSS.escape(id)}`);
+    if (seedEle.length) {
+      cy.animate({ fit: { eles: seedEle, padding: 120 }, duration: 350 });
+      openDetail(seedEle.data());
+    }
+
+    document.getElementById('stat-nodes').textContent = data.stats.nodes;
+    document.getElementById('stat-edges').textContent = data.stats.edges;
+    document.getElementById('trunc-badge').classList.remove('visible');
+
+    showNbBadge(data.seed.label || id, depth);
+  } catch (err) {
+    showError('Erro: ' + err.message);
+  }
+  showLoading(false);
+}
+
+function clearFocus() {
+  viewMode   = 'full';
+  seedNodeId = null;
+  hideNbBadge();
+  loadGraph();
+}
+
+function showNbBadge(label, depth) {
+  const b = document.getElementById('nb-mode-badge');
+  document.getElementById('nb-badge-label').textContent = `⬡ Foco: ${label}`;
+  document.getElementById('nb-depth-select').value = String(depth);
+  b.style.display = 'flex';
+}
+
+function hideNbBadge() {
+  document.getElementById('nb-mode-badge').style.display = 'none';
+}
+
+document.getElementById('nb-depth-select').addEventListener('change', e => {
+  if (viewMode === 'neighborhood' && seedNodeId) {
+    loadNeighborhood(seedNodeId, parseInt(e.target.value, 10));
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════
    Stats on init
 ═══════════════════════════════════════════════════════════════════ */
 async function loadStats() {
@@ -1108,6 +1218,7 @@ async function openDetail(nodeData) {
     <span class="dp-badge type" style="--badge-bg:${color}18;--badge-color:${color};background:${color}18;color:${color}">${esc(nodeData.type)}</span>
     <span class="dp-badge conf">conf. ${conf}</span>
     ${nodeData.inferred ? '<span class="dp-badge infer">inferido</span>' : ''}
+    <button class="dp-nb-btn" data-id="${esc(nodeData.id)}" title="Carregar grafo de vizinhança">⬡ Vizinhança</button>
   `;
 
   // Show panel
@@ -1275,6 +1386,7 @@ async function doSearch(q) {
         <div class="si-dot" style="background:${color}"></div>
         <div class="si-name">${esc(r.label || r.name)}</div>
         <div class="si-type">${esc(r.type)}</div>
+        <button class="si-nb-btn" data-id="${esc(r.id)}" title="Ver vizinhança">⬡</button>
       </div>`;
   }).join('');
   box.querySelectorAll('.search-item').forEach(el => {
@@ -1282,6 +1394,12 @@ async function doSearch(q) {
       hideSearch();
       document.getElementById('search-input').value = '';
       focusNode(el.dataset.id);
+    });
+    el.querySelector('.si-nb-btn')?.addEventListener('click', e => {
+      e.stopPropagation();
+      hideSearch();
+      document.getElementById('search-input').value = '';
+      loadNeighborhood(el.dataset.id);
     });
   });
   box.classList.add('visible');
@@ -1327,6 +1445,11 @@ document.getElementById('fc-zoom-in').addEventListener('click',  () => cy && cy.
 document.getElementById('fc-zoom-out').addEventListener('click', () => cy && cy.zoom({ level: cy.zoom() * 0.8,  renderedPosition: { x: cy.width()/2, y: cy.height()/2 } }));
 document.getElementById('fc-center').addEventListener('click',   () => cy && cy.fit(undefined, 30));
 document.getElementById('dp-close').addEventListener('click', closeDetail);
+
+document.getElementById('dp-badges').addEventListener('click', e => {
+  const btn = e.target.closest('.dp-nb-btn');
+  if (btn) loadNeighborhood(btn.dataset.id);
+});
 
 /* ═══════════════════════════════════════════════════════════════════
    Slider labels
