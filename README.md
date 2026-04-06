@@ -576,9 +576,12 @@ Gera documentacao markdown a partir do modelo, sem escrita manual.
 uai-cc executive
 uai-cc executive "Termo de Cessao"
 uai-cc executive "NFE CNAB400" --scope both --format both --full
+uai-cc executive "PROCESSAMENTO" --scope focused --format mermaid --depth 2
 ```
 
 Gera um dossie executivo do sistema inteiro ou de um recorte livre, sempre sustentado pelo modelo UAI.
+
+Em modelos grandes, o recorte `focused` aplica timeout por view e faz fallback parcial automatico quando necessario, registrando `complete` ou `partial` no markdown e no `index.md`.
 
 **Saidas:**
 ```

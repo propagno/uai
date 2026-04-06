@@ -87,7 +87,7 @@ function classifyByContent(filePath) {
   }
 
   // Messaging layouts: CIP ACCC messages, CNAB layouts, CVM351, GARQ
-  if (lines.some(l => /\b(ACCC0(13|14|31|32)|CNAB\s*(240|400|500)|CVM[\s-]?351|SCC3GRAD|GARQ2000|FRECB053)\b/i.test(l))) {
+  if (lines.some(l => /\b(ACCC0(13|14|31|32)|CNAB\s*(240|400|500)|CVM[\s-]?351|SCC3GRAD|GARQ2000)\b/i.test(l))) {
     return { dialect: 'messaging', role: 'message_layout' };
   }
 

@@ -7,14 +7,15 @@ Gera uma visao executiva do sistema ou de um recorte especifico em Markdown com 
 # /uai-executive
 Execute the UAI wrapper command `uai-executive` using the repo-local engine.
 ## Invocation
-- Usage: `/uai-executive [query] [--scope system|focused|both] [--format mermaid|structurizr|both] [--depth N] [--full] [--out .uai/docs/executive]`
+- Usage: `/uai-executive [query] [--scope system|focused|both] [--format mermaid|structurizr|both] [--depth N] [--timeout 30s] [--full] [--out .uai/docs/executive]`
 - Example: `/uai-executive`
 - Example: `/uai-executive "Termo de Cessao"`
 - Example: `/uai-executive "NFE CNAB400" --scope both --format both --full`
+- Example: `/uai-executive "PROCESSAMENTO" --scope focused --format mermaid --depth 2`
 
 ## Inputs
 - query (optional): Tema, artefato ou consulta livre para a visao focada.
-- arguments (optional): Escopo, formato, profundidade, full e diretorio de saida.
+- arguments (optional): Escopo, formato, profundidade, timeout, full e diretorio de saida.
 
 ## Preconditions
 - Artifact `.uai/model/entities.json`: O modelo canonico precisa existir antes da visao executiva.
@@ -33,17 +34,18 @@ Execute the UAI wrapper command `uai-executive` using the repo-local engine.
 
 ## Response Contract
 - Return fields: `status`, `summary`, `artifacts`, `evidence_or_notes`, `next_commands`
-- Informe os arquivos gerados e destaque se houve colapso, truncamento ou ambiguidade na consulta.
+- Informe os arquivos gerados e destaque se houve colapso, truncamento, timeout com fallback parcial ou ambiguidade na consulta.
 - Keep file paths relative to the repository or to `.uai/` aliases only.
 
 ## Safety Rules
 - Nao escreva fora de `.uai/docs/executive/` sem instrucao explicita.
 - Se faltar o modelo, bloqueie e recomende `uai-model`.
 - Se a consulta for ambigua, registre a selecao principal e as alternativas mais proximas.
+- Em timeout do recorte focado, gere fallback parcial e registre o status da view no markdown e no index.
 
 ## Suggested Next Commands
 - `/uai-doc`
 - `/uai-verify`
 
 ## Notes
-Use este comando para materializar uma leitura executiva sustentada pelo modelo UAI, com foco em narrativa de fluxo, dados e persistencia sem depender de renderizacao externa.
+Use este comando para materializar uma leitura executiva sustentada pelo modelo UAI, com foco em narrativa de fluxo, dados e persistencia sem depender de renderizacao externa. Em modelos grandes, o recorte focado usa timeout com fallback parcial para evitar travamentos e registrar explicitamente degradacao de cobertura.

@@ -7,15 +7,19 @@ const os = require('os');
 const path = require('path');
 const childProcess = require('child_process');
 
-function runNode(repoRoot, cwd, args, expectedStatus = 0) {
+function runNode(repoRoot, cwd, args, options = {}) {
   const result = childProcess.spawnSync(process.execPath, [path.join(repoRoot, 'bin', 'uai-cc.js'), ...args], {
     cwd,
+    env: {
+      ...process.env,
+      ...(options.env || {}),
+    },
     encoding: 'utf-8',
   });
 
   assert.equal(
     result.status,
-    expectedStatus,
+    options.expectedStatus ?? 0,
     `Command failed: node bin/uai-cc.js ${args.join(' ')}\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
   );
 
@@ -138,6 +142,7 @@ test('executive command generates system markdown and structurizr without precom
   assert.match(systemDsl, /workspace "System Overview"/);
   assert.match(systemDsl, /softwareSystem "UAI Executive Test"/);
   assert.match(index, /system-overview/);
+  assert.match(index, /\|\s*system-overview\s*\|\s*complete\s*\|/i);
 });
 
 test('executive command resolves ambiguous query and writes macro plus focused views', () => {
@@ -181,7 +186,7 @@ test('executive command honors mermaid-only and structurizr-only outputs', () =>
   assert.ok(!fs.existsSync(path.join(mdOut, 'system-overview.dsl')));
 });
 
-test('executive command records hard-cap truncation when --full exceeds readability ceiling', () => {
+test('executive command keeps focused views readable under --full on dense models', () => {
   const repoRoot = path.resolve(__dirname, '..');
   const tmpDir = initWorkspace(repoRoot, 'UAI Executive Large');
   writeModel(tmpDir, megaModel());
@@ -189,5 +194,60 @@ test('executive command records hard-cap truncation when --full exceeds readabil
   runNode(repoRoot, tmpDir, ['executive', 'MEGA', '--scope', 'focused', '--full', '--depth', '120']);
 
   const focusedMd = fs.readFileSync(path.join(tmpDir, '.uai', 'docs', 'executive', 'mega.md'), 'utf-8');
-  assert.match(focusedMd, /teto duro/i);
+  assert.match(focusedMd, /> Status: COMPLETE/);
+  assert.match(focusedMd, /## Fluxo Fim a Fim/);
+});
+
+test('executive command falls back to partial focused view on timeout', () => {
+  const repoRoot = path.resolve(__dirname, '..');
+  const tmpDir = initWorkspace(repoRoot, 'UAI Executive Timeout');
+  writeModel(tmpDir, termModel());
+
+  runNode(repoRoot, tmpDir, ['executive', 'Termo de Cessao', '--scope', 'focused', '--format', 'mermaid', '--timeout', '250ms'], {
+    env: {
+      UAI_EXECUTIVE_TEST_DELAY_FOCUSED_MS: '600',
+    },
+  });
+
+  const focusedMd = fs.readFileSync(path.join(tmpDir, '.uai', 'docs', 'executive', 'termo-de-cessao.md'), 'utf-8');
+  const index = fs.readFileSync(path.join(tmpDir, '.uai', 'docs', 'executive', 'index.md'), 'utf-8');
+
+  assert.match(focusedMd, /> Status: PARTIAL/);
+  assert.match(focusedMd, /Motivo da degradacao: timeout/);
+  assert.match(index, /\|\s*termo-de-cessao\s*\|\s*partial\s*\|/i);
+});
+
+test('executive command keeps system view when focused times out under scope both', () => {
+  const repoRoot = path.resolve(__dirname, '..');
+  const tmpDir = initWorkspace(repoRoot, 'UAI Executive Both');
+  writeModel(tmpDir, termModel());
+
+  const result = runNode(repoRoot, tmpDir, ['executive', 'Termo de Cessao', '--scope', 'both', '--format', 'mermaid', '--timeout', '250ms'], {
+    env: {
+      UAI_EXECUTIVE_TEST_DELAY_FOCUSED_MS: '600',
+    },
+  });
+
+  assert.match(result.stdout, /Timeout excedido; aplicando fallback parcial na view focused/);
+  assert.ok(fs.existsSync(path.join(tmpDir, '.uai', 'docs', 'executive', 'system-overview.md')));
+  assert.ok(fs.existsSync(path.join(tmpDir, '.uai', 'docs', 'executive', 'termo-de-cessao.md')));
+});
+
+test('executive command surfaces worker errors explicitly instead of opaque exit codes', () => {
+  const repoRoot = path.resolve(__dirname, '..');
+  const tmpDir = initWorkspace(repoRoot, 'UAI Executive Error');
+  writeModel(tmpDir, termModel());
+
+  const result = childProcess.spawnSync(process.execPath, [path.join(repoRoot, 'bin', 'uai-cc.js'), 'executive', 'Termo de Cessao', '--scope', 'focused', '--format', 'mermaid'], {
+    cwd: tmpDir,
+    env: {
+      ...process.env,
+      UAI_EXECUTIVE_TEST_FORCE_ERROR_SCOPE: 'focused',
+    },
+    encoding: 'utf-8',
+  });
+
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /Falha na view focused/i);
+  assert.doesNotMatch(result.stderr, /\b127\b/);
 });

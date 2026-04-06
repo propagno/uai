@@ -33,10 +33,67 @@ const IMPORTANT_REL_TYPES = new Set([
   'DATA_CONTRACT',
 ]);
 const WEAK_ENTITY_TYPES = new Set(['field', 'column', 'control', 'paragraph']);
+const VIEW_PROFILES = {
+  system: {
+    name: 'system',
+    flowLimit: 10,
+    rawNodeBudget: 320,
+    rawEdgeBudget: 960,
+    relationAugmentLimit: 1200,
+    maxProgramsPerStep: 12,
+    maxProceduresPerStep: 10,
+    maxDataPerStep: 16,
+    maxAggregatePrograms: 24,
+    maxAggregateProcedures: 18,
+    maxAggregateData: 24,
+  },
+  focused: {
+    name: 'focused',
+    flowLimit: 6,
+    subjectLimit: 36,
+    rawNodeBudget: 220,
+    rawEdgeBudget: 720,
+    relationAugmentLimit: 900,
+    maxProgramsPerStep: 10,
+    maxProceduresPerStep: 8,
+    maxDataPerStep: 12,
+    maxAggregatePrograms: 16,
+    maxAggregateProcedures: 12,
+    maxAggregateData: 16,
+  },
+  system_partial: {
+    name: 'system_partial',
+    flowLimit: 6,
+    rawNodeBudget: 180,
+    rawEdgeBudget: 540,
+    relationAugmentLimit: 540,
+    maxProgramsPerStep: 8,
+    maxProceduresPerStep: 6,
+    maxDataPerStep: 10,
+    maxAggregatePrograms: 12,
+    maxAggregateProcedures: 8,
+    maxAggregateData: 12,
+  },
+  focused_partial: {
+    name: 'focused_partial',
+    flowLimit: 4,
+    subjectLimit: 18,
+    rawNodeBudget: 120,
+    rawEdgeBudget: 360,
+    relationAugmentLimit: 300,
+    maxProgramsPerStep: 6,
+    maxProceduresPerStep: 5,
+    maxDataPerStep: 8,
+    maxAggregatePrograms: 8,
+    maxAggregateProcedures: 6,
+    maxAggregateData: 8,
+  },
+};
 
 function buildContext(entities, relations, opts = {}) {
   const entityById = new Map((entities || []).map(entity => [entity.id, entity]));
   const index = entityIdx.buildEntityIndex(entities || []);
+  const relationIndex = graph.buildIndex(relations || []);
   const batchFlows = opts.batchFlows || batchFlow.build(entities || [], relations || []);
   const functionalFlows = opts.functionalFlows || functionalFlow.build(entities || [], relations || [], {
     batchFlow: batchFlows,
@@ -48,24 +105,27 @@ function buildContext(entities, relations, opts = {}) {
     relations: relations || [],
     entityById,
     index,
+    relationIndex,
     batchFlows,
     functionalFlows,
   };
 }
 
 function buildSystemView(context, opts = {}) {
+  const profile = resolveViewProfile('system', opts);
   const rankedFlows = [...(context.functionalFlows || [])].sort((a, b) =>
     scoreFlowRichness(b) - scoreFlowRichness(a) ||
     (a.entry_label || a.entry_name || '').localeCompare(b.entry_label || b.entry_name || ''),
   );
-  const maxFlows = opts.full ? 16 : 10;
+  const maxFlows = opts.full ? Math.min(profile.flowLimit + 6, 16) : profile.flowLimit;
   const selectedFlows = rankedFlows.slice(0, maxFlows);
-  const rawGraph = collectFlowGraph(selectedFlows, context.relations, context.entityById, {
+  const rawGraph = collectFlowGraph(selectedFlows, context.relationIndex, context.entityById, {
     selectedFlowIds: new Set(selectedFlows.map(flow => flow.id)),
     selectedEntityIds: new Set(),
+    profile,
   });
 
-  const diagrams = buildDiagrams(rawGraph, { full: opts.full });
+  const diagrams = buildDiagrams(rawGraph, { full: opts.full, profile, degraded: Boolean(opts.partial), degradedReason: opts.reason || null });
   const counts = countEntityTypes(context.entities);
   const highlights = selectedFlows.slice(0, 5).map(flow => ({
     label: flow.entry_label,
@@ -90,21 +150,23 @@ function buildSystemView(context, opts = {}) {
       ],
     },
     diagrams,
-    notes: buildSystemNotes(selectedFlows, diagrams),
+    status: opts.partial ? 'partial' : 'complete',
+    generation: buildGenerationMeta('system', profile, opts),
+    notes: appendGenerationNotes(buildSystemNotes(selectedFlows, diagrams), opts, profile),
   };
 }
 
 function buildFocusedView(context, query, opts = {}) {
+  const profile = resolveViewProfile('focused', opts);
   const selection = resolveSelection(query, context);
 
-  // GAP 1: When best match is a table/entity, seed the subject set with its producer
-  // chain (programs that WRITE/UPDATE this entity) so the full lifecycle is captured.
   const selectedEntity = selection.selected && selection.selected.category === 'entity'
     ? (selection.entityMatches[0] && selection.entityMatches[0].entity)
     : null;
   const producerIds = [];
   if (selectedEntity && ['table', 'dataset', 'copybook'].includes(selectedEntity.type)) {
-    for (const rel of context.relations) {
+    const inbound = collectIndexedRelations(context.relationIndex, [selectedEntity.id, selectedEntity.name], 'upstream');
+    for (const rel of inbound) {
       if (['WRITES', 'UPDATES', 'DATA_CONTRACT'].includes(rel.rel)) {
         const toId = rel.to_id || rel.to;
         if (toId === selectedEntity.id || toId === selectedEntity.name) {
@@ -117,21 +179,25 @@ function buildFocusedView(context, query, opts = {}) {
   const initialSubjectIds = producerIds.length > 0
     ? [...new Set([...selection.subjectIds, ...producerIds])]
     : selection.subjectIds;
-  const expandedSubjectIds = expandSubjectIds(initialSubjectIds, context.relations, opts.depth || 4, opts.full ? 72 : 36);
+  const expandedSubjectIds = expandSubjectIds(initialSubjectIds, context.relationIndex, opts.depth || 4, profile.subjectLimit || (opts.full ? 72 : 36));
   const relatedFlows = mergeFlowMatches(
     selection.flowMatches,
     functionalFlow.findRelatedFlows(context.functionalFlows, expandedSubjectIds),
-  );
+  ).slice(0, profile.flowLimit);
   const rawGraph = relatedFlows.length > 0
-    ? collectFlowGraph(relatedFlows.map(item => item.flow), context.relations, context.entityById, {
+    ? collectFlowGraph(relatedFlows.map(item => item.flow), context.relationIndex, context.entityById, {
         selectedFlowIds: new Set(relatedFlows.map(item => item.flow.id)),
         selectedEntityIds: new Set(selection.entityMatches.map(item => item.entity.id)),
+        selectedSubjectIds: new Set(expandedSubjectIds),
+        profile,
       })
-    : collectTraversalGraph(expandedSubjectIds, context.relations, context.entityById, opts.depth || 4, {
+    : collectTraversalGraph(expandedSubjectIds, context.relationIndex, context.entityById, opts.depth || 4, {
         selectedEntityIds: new Set(selection.entityMatches.map(item => item.entity.id)),
+        maxNodes: profile.rawNodeBudget,
+        maxEdges: profile.rawEdgeBudget,
       });
 
-  const diagrams = buildDiagrams(rawGraph, { full: opts.full });
+  const diagrams = buildDiagrams(rawGraph, { full: opts.full, profile, degraded: Boolean(opts.partial), degradedReason: opts.reason || null });
   const summary = summarizeFocused(query, selection, relatedFlows, rawGraph);
 
   return {
@@ -145,7 +211,9 @@ function buildFocusedView(context, query, opts = {}) {
     selection,
     summary,
     diagrams,
-    notes: buildFocusedNotes(selection, relatedFlows, diagrams),
+    status: opts.partial ? 'partial' : 'complete',
+    generation: buildGenerationMeta('focused', profile, opts),
+    notes: appendGenerationNotes(buildFocusedNotes(selection, relatedFlows, diagrams), opts, profile),
   };
 }
 
@@ -154,6 +222,7 @@ function toMarkdown(view) {
     `# ${view.title}`,
     '',
     `> Gerado por UAI em ${new Date().toISOString()}`,
+    `> Status: ${(view.status || 'complete').toUpperCase()}`,
     '',
     '## Resumo Executivo',
     '',
@@ -163,6 +232,22 @@ function toMarkdown(view) {
     lines.push(`- ${sentence}`);
   }
   lines.push('');
+
+  if (view.generation && (view.generation.reason || view.generation.profile || view.generation.timeout_ms)) {
+    lines.push('## Status de Geracao', '');
+    lines.push(`- Perfil: ${view.generation.profile}`);
+    lines.push(`- Modo: ${view.generation.mode}`);
+    if (view.generation.reason) {
+      lines.push(`- Motivo da degradacao: ${view.generation.reason}`);
+    }
+    if (view.generation.timeout_ms) {
+      lines.push(`- Timeout aplicado: ${view.generation.timeout_ms}ms`);
+    }
+    if (view.generation.depth) {
+      lines.push(`- Profundidade: ${view.generation.depth}`);
+    }
+    lines.push('');
+  }
 
   if (view.kind === 'focused') {
     lines.push('## Resolucao da Consulta', '');
@@ -253,8 +338,8 @@ function buildIndexMarkdown(entries = []) {
     '',
     `> Atualizado em ${new Date().toISOString()}`,
     '',
-    '| View | Formatos |',
-    '|------|----------|',
+    '| View | Status | Formatos |',
+    '|------|--------|----------|',
   ];
 
   for (const entry of entries) {
@@ -265,11 +350,11 @@ function buildIndexMarkdown(entries = []) {
     if (entry.dsl) {
       formats.push('Structurizr DSL');
     }
-    lines.push(`| ${entry.slug} | ${formats.join(', ') || 'n/a'} |`);
+    lines.push(`| ${entry.slug} | ${entry.status || 'complete'} | ${formats.join(', ') || 'n/a'} |`);
   }
 
   if (entries.length === 0) {
-    lines.push('| _nenhuma view_ | _nenhum formato_ |');
+    lines.push('| _nenhuma view_ | _n/a_ | _nenhum formato_ |');
   }
 
   lines.push('');
@@ -288,48 +373,58 @@ function slugify(value) {
 
 function buildDiagrams(rawGraph, opts = {}) {
   const focusNodeIds = new Set(rawGraph.nodes.filter(node => node.selected || node.role === 'entry').map(node => node.id));
-  const overview = shapeDiagram(rawGraph, { title: 'Panorama executivo do recorte', direction: 'LR', focusNodeIds, full: opts.full });
+  const prunedGraph = applyRawGraphBudget(rawGraph, {
+    focusNodeIds,
+    profile: opts.profile || VIEW_PROFILES.focused,
+    degraded: Boolean(opts.degraded),
+    degradedReason: opts.degradedReason || null,
+  });
+  const overview = shapeDiagram(prunedGraph, { title: 'Panorama executivo do recorte', direction: 'LR', focusNodeIds, full: opts.full, profile: opts.profile });
   const endToEnd = shapeDiagram({
-    nodes: rawGraph.nodes,
-    edges: rawGraph.edges.filter(edge => ['FLOW', 'EXECUTES', 'CALLS', 'CALLS_PROC'].includes(edge.kind)),
+    nodes: prunedGraph.nodes,
+    edges: prunedGraph.edges.filter(edge => ['FLOW', 'EXECUTES', 'CALLS', 'CALLS_PROC'].includes(edge.kind)),
   }, {
     title: 'Encadeamento principal entre entradas, steps e programas',
     direction: 'LR',
     focusNodeIds,
     full: opts.full,
+    profile: opts.profile,
   });
   const lineage = shapeDiagram({
-    nodes: rawGraph.nodes,
-    edges: rawGraph.edges.filter(edge => ['READS', 'WRITES', 'UPDATES', 'EXECUTES', 'DATA_CONTRACT'].includes(edge.kind)),
+    nodes: prunedGraph.nodes,
+    edges: prunedGraph.edges.filter(edge => ['READS', 'WRITES', 'UPDATES', 'EXECUTES', 'DATA_CONTRACT'].includes(edge.kind)),
   }, {
     title: 'Lineage resumido de programas, steps e dados',
     direction: 'LR',
     focusNodeIds,
     full: opts.full,
+    profile: opts.profile,
   });
-  const runtimeEdges = rawGraph.edges.filter(edge =>
+  const runtimeEdges = prunedGraph.edges.filter(edge =>
     ['FLOW', 'EXECUTES', 'READS', 'WRITES', 'UPDATES'].includes(edge.kind) &&
     ['job', 'step', 'program', 'procedure', 'dataset', 'table'].includes(edge.from_type) &&
     ['job', 'step', 'program', 'procedure', 'dataset', 'table'].includes(edge.to_type),
   );
   const runtime = runtimeEdges.length > 0
     ? shapeDiagram({
-        nodes: rawGraph.nodes,
+        nodes: prunedGraph.nodes,
         edges: runtimeEdges,
       }, {
         title: 'Detalhe de steps, programas e IO de dados',
         direction: 'TD',
         focusNodeIds,
         full: opts.full,
+        profile: opts.profile,
       })
     : null;
 
-  return { overview, endToEnd, lineage, runtime };
+  return { overview, endToEnd, lineage, runtime, metaNotes: prunedGraph.notes || [] };
 }
 
 function shapeDiagram(rawGraph, opts = {}) {
   const nodes = dedupeNodes(rawGraph.nodes || []);
-  const keptEdges = dedupeEdges((rawGraph.edges || []).filter(edge => nodes.some(node => node.id === edge.from) && nodes.some(node => node.id === edge.to)));
+  const nodeIds = new Set(nodes.map(node => node.id));
+  const keptEdges = dedupeEdges((rawGraph.edges || []).filter(edge => nodeIds.has(edge.from) && nodeIds.has(edge.to)));
   const softLimit = opts.full ? HARD_NODE_LIMIT : SOFT_NODE_LIMIT;
   const finalLimit = Math.min(HARD_NODE_LIMIT, softLimit);
   const reduction = reduceGraph(nodes, keptEdges, {
@@ -337,6 +432,7 @@ function shapeDiagram(rawGraph, opts = {}) {
     hardCap: HARD_NODE_LIMIT,
     focusNodeIds: opts.focusNodeIds || new Set(),
     full: opts.full,
+    noteKind: 'legibility',
   });
 
   return {
@@ -349,10 +445,11 @@ function shapeDiagram(rawGraph, opts = {}) {
   };
 }
 
-function collectFlowGraph(flows, relations, entityById, opts = {}) {
+function collectFlowGraph(flows, relationIndex, entityById, opts = {}) {
   const nodes = new Map();
   const edges = new Map();
   const subjectIds = new Set();
+  const profile = opts.profile || VIEW_PROFILES.focused;
 
   for (const flow of flows || []) {
     const entryType = flow.entry_type === 'job'
@@ -391,10 +488,10 @@ function collectFlowGraph(flows, relations, entityById, opts = {}) {
 
     for (const step of sortSteps(flow.steps || [])) {
       const stepId = step.id || `step:${flow.entry_id}:${step.name}`;
-      const directPrograms = uniqueItems(step.direct_programs || step.programs || []);
-      const downstreamPrograms = uniqueItems(step.downstream_programs || []);
-      const procedures = uniqueItems(step.procedures || []);
-      const dataObjects = uniqueItems(step.data_objects || []);
+      const directPrograms = uniqueItems(step.direct_programs || step.programs || []).slice(0, profile.maxProgramsPerStep);
+      const downstreamPrograms = uniqueItems(step.downstream_programs || []).slice(0, profile.maxProgramsPerStep);
+      const procedures = uniqueItems(step.procedures || []).slice(0, profile.maxProceduresPerStep);
+      const dataObjects = uniqueItems(step.data_objects || []).slice(0, profile.maxDataPerStep);
 
       for (const program of directPrograms) {
         addNode(nodes, toNode(program, { selected: (opts.selectedEntityIds || new Set()).has(program.id) }));
@@ -425,44 +522,49 @@ function collectFlowGraph(flows, relations, entityById, opts = {}) {
       }
     }
 
-    for (const routine of uniqueItems(flow.routines || [])) {
+    for (const routine of uniqueItems(flow.routines || []).slice(0, profile.maxAggregatePrograms)) {
       addNode(nodes, toNode(routine));
       addEdge(edges, flow.entry_id, routine.id, 'HANDLES', 'HANDLES', 'HANDLES', entryType, routine.type || 'subroutine');
       subjectIds.add(routine.id);
     }
 
-    for (const component of uniqueItems(flow.components || [])) {
+    for (const component of uniqueItems(flow.components || []).slice(0, profile.maxAggregatePrograms)) {
       addNode(nodes, toNode(component));
       addEdge(edges, flow.entry_id, component.id, 'USES', 'USES', 'USES', entryType, component.type || 'component');
       subjectIds.add(component.id);
     }
 
-    for (const klass of uniqueItems(flow.classes || [])) {
+    for (const klass of uniqueItems(flow.classes || []).slice(0, profile.maxAggregatePrograms)) {
       addNode(nodes, toNode(klass));
       addEdge(edges, flow.entry_id, klass.id, 'EVENTS', 'HANDLES_EVENTS', 'HANDLES_EVENTS', entryType, klass.type || 'class');
       subjectIds.add(klass.id);
     }
 
-    for (const program of uniqueItems(flow.programs || [])) {
-      addNode(nodes, toNode(program, { selected: (opts.selectedEntityIds || new Set()).has(program.id) }));
-      subjectIds.add(program.id);
-      if (!(flow.steps || []).length && flow.entry_id !== program.id) {
-        addEdge(edges, flow.entry_id, program.id, 'ENTRY', 'FLOW', 'FLOW', entryType, program.type || 'program');
+    const includeAggregateLists = !(flow.steps || []).length;
+    if (includeAggregateLists) {
+      for (const program of uniqueItems(flow.programs || []).slice(0, profile.maxAggregatePrograms)) {
+        addNode(nodes, toNode(program, { selected: (opts.selectedEntityIds || new Set()).has(program.id) }));
+        subjectIds.add(program.id);
+        if (flow.entry_id !== program.id) {
+          addEdge(edges, flow.entry_id, program.id, 'ENTRY', 'FLOW', 'FLOW', entryType, program.type || 'program');
+        }
       }
-    }
 
-    for (const procedure of uniqueItems(flow.procedures || [])) {
-      addNode(nodes, toNode(procedure));
-      subjectIds.add(procedure.id);
-    }
+      for (const procedure of uniqueItems(flow.procedures || []).slice(0, profile.maxAggregateProcedures)) {
+        addNode(nodes, toNode(procedure));
+        subjectIds.add(procedure.id);
+      }
 
-    for (const data of uniqueItems(flow.data_objects || [])) {
-      addNode(nodes, toNode(data));
-      subjectIds.add(data.id);
+      for (const data of uniqueItems(flow.data_objects || []).slice(0, profile.maxAggregateData)) {
+        addNode(nodes, toNode(data));
+        subjectIds.add(data.id);
+      }
     }
   }
 
-  addRelationEdges(edges, nodes, relations, entityById, subjectIds, opts.selectedEntityIds || new Set());
+  addRelationEdges(edges, nodes, relationIndex, entityById, subjectIds, opts.selectedEntityIds || new Set(), {
+    maxEdges: profile.relationAugmentLimit,
+  });
 
   return {
     nodes: [...nodes.values()],
@@ -470,9 +572,11 @@ function collectFlowGraph(flows, relations, entityById, opts = {}) {
   };
 }
 
-function collectTraversalGraph(subjectIds, relations, entityById, depth, opts = {}) {
-  const idx = graph.buildIndex(relations);
-  const traversal = graph.traverse(subjectIds, idx, 'both', depth);
+function collectTraversalGraph(subjectIds, relationIndex, entityById, depth, opts = {}) {
+  const maxEdges = opts.maxEdges || 5000;
+  // Pass a bounded maxResults to graph.traverse so the result array never explodes in memory.
+  // 10x the edge budget gives enough headroom for IMPORTANT_REL_TYPES filtering.
+  const traversal = graph.traverse(subjectIds, relationIndex, 'both', depth, maxEdges * 10);
   const nodes = new Map();
   const edges = new Map();
 
@@ -484,6 +588,9 @@ function collectTraversalGraph(subjectIds, relations, entityById, depth, opts = 
   }
 
   for (const rel of traversal) {
+    if (edges.size >= maxEdges) {
+      break;
+    }
     if (!IMPORTANT_REL_TYPES.has(rel.rel)) {
       continue;
     }
@@ -521,45 +628,55 @@ function collectTraversalGraph(subjectIds, relations, entityById, depth, opts = 
   };
 }
 
-function addRelationEdges(edgeMap, nodeMap, relations, entityById, subjectIds, selectedEntityIds) {
-  for (const rel of relations || []) {
-    if (!IMPORTANT_REL_TYPES.has(rel.rel)) {
-      continue;
-    }
+function addRelationEdges(edgeMap, nodeMap, relationIndex, entityById, subjectIds, selectedEntityIds, opts = {}) {
+  const seen = new Set();
+  const maxEdges = opts.maxEdges || Infinity;
 
-    const fromId = rel.from_id || rel.from;
-    const toId = rel.to_id || rel.to;
-    if (!fromId || !toId) {
-      continue;
-    }
+  for (const subjectId of subjectIds || []) {
+    const adjacent = collectIndexedRelations(relationIndex, [subjectId], 'both');
+    for (const rel of adjacent) {
+      if (edgeMap.size >= maxEdges) {
+        return;
+      }
+      if (!IMPORTANT_REL_TYPES.has(rel.rel)) {
+        continue;
+      }
 
-    const relatesToSubject = subjectIds.has(fromId) || subjectIds.has(toId);
-    if (!relatesToSubject) {
-      continue;
-    }
+      const fromId = rel.from_id || rel.from;
+      const toId = rel.to_id || rel.to;
+      if (!fromId || !toId) {
+        continue;
+      }
 
-    const fromEntity = entityById.get(fromId);
-    const toEntity = entityById.get(toId);
-    addNode(nodeMap, fromEntity ? toNode(fromEntity, { selected: selectedEntityIds.has(fromId) }) : {
-      id: fromId,
-      label: rel.from_label || rel.from,
-      type: rel.from_type || inferTypeFromId(fromId),
-    });
-    addNode(nodeMap, toEntity ? toNode(toEntity, { selected: selectedEntityIds.has(toId) }) : {
-      id: toId,
-      label: rel.to_label || rel.to,
-      type: rel.to_type || inferTypeFromId(toId),
-    });
-    addEdge(
-      edgeMap,
-      fromId,
-      toId,
-      rel.rel,
-      rel.rel,
-      rel.rel,
-      (fromEntity && fromEntity.type) || rel.from_type || inferTypeFromId(fromId),
-      (toEntity && toEntity.type) || rel.to_type || inferTypeFromId(toId),
-    );
+      const relKey = `${fromId}:${toId}:${rel.rel}`;
+      if (seen.has(relKey)) {
+        continue;
+      }
+      seen.add(relKey);
+
+      const fromEntity = entityById.get(fromId);
+      const toEntity = entityById.get(toId);
+      addNode(nodeMap, fromEntity ? toNode(fromEntity, { selected: selectedEntityIds.has(fromId) }) : {
+        id: fromId,
+        label: rel.from_label || rel.from,
+        type: rel.from_type || inferTypeFromId(fromId),
+      });
+      addNode(nodeMap, toEntity ? toNode(toEntity, { selected: selectedEntityIds.has(toId) }) : {
+        id: toId,
+        label: rel.to_label || rel.to,
+        type: rel.to_type || inferTypeFromId(toId),
+      });
+      addEdge(
+        edgeMap,
+        fromId,
+        toId,
+        rel.rel,
+        rel.rel,
+        rel.rel,
+        (fromEntity && fromEntity.type) || rel.from_type || inferTypeFromId(fromId),
+        (toEntity && toEntity.type) || rel.to_type || inferTypeFromId(toId),
+      );
+    }
   }
 }
 
@@ -672,6 +789,7 @@ function buildBusinessSummary(relatedFlows, rawGraph) {
   const chain = new Set();
   const persistence = new Set();
   const outputs = new Set();
+  const nodeById = new Map((rawGraph.nodes || []).map(node => [node.id, node]));
 
   for (const item of relatedFlows || []) {
     const flow = item.flow;
@@ -690,8 +808,8 @@ function buildBusinessSummary(relatedFlows, rawGraph) {
   }
 
   for (const edge of rawGraph.edges || []) {
-    const fromNode = rawGraph.nodes.find(node => node.id === edge.from);
-    const toNode = rawGraph.nodes.find(node => node.id === edge.to);
+    const fromNode = nodeById.get(edge.from);
+    const toNode = nodeById.get(edge.to);
     if (!fromNode || !toNode) {
       continue;
     }
@@ -744,7 +862,7 @@ function buildFocusedNotes(selection, relatedFlows, diagrams) {
 }
 
 function collectDiagramNotes(diagrams) {
-  const notes = [];
+  const notes = [...((diagrams && diagrams.metaNotes) || [])];
   for (const key of Object.keys(diagrams || {})) {
     const diagram = diagrams[key];
     if (!diagram) {
@@ -774,6 +892,9 @@ function reduceGraph(nodes, edges, opts = {}) {
   const full = Boolean(opts.full);
   const hardCap = opts.hardCap || HARD_NODE_LIMIT;
   const limit = Math.min(opts.limit || SOFT_NODE_LIMIT, hardCap);
+  const noteKind = opts.noteKind || 'legibility';
+  const degreeByNode = buildDegreeIndex(edges);
+  const nodeById = new Map((nodes || []).map(node => [node.id, node]));
 
   let keepNodes = [...nodes];
   let collapsed = 0;
@@ -781,7 +902,7 @@ function reduceGraph(nodes, edges, opts = {}) {
 
   if (keepNodes.length > limit) {
     const sorted = [...keepNodes].sort((a, b) =>
-      computeNodeWeight(b, edges, focusNodeIds) - computeNodeWeight(a, edges, focusNodeIds) ||
+      computeNodeWeight(b, degreeByNode, focusNodeIds) - computeNodeWeight(a, degreeByNode, focusNodeIds) ||
       a.label.localeCompare(b.label),
     );
     const focused = sorted.filter(node => focusNodeIds.has(node.id));
@@ -789,12 +910,11 @@ function reduceGraph(nodes, edges, opts = {}) {
     const headroom = Math.max(limit - focused.length, 0);
     const ranked = sorted.filter(node => !focusedIds.has(node.id)).slice(0, headroom);
     keepNodes = dedupeNodes([...focused, ...ranked]);
-    const omitted = nodes.filter(node => !keepNodes.some(item => item.id === node.id));
+    const keepIds = new Set(keepNodes.map(item => item.id));
+    const omitted = nodes.filter(node => !keepIds.has(node.id));
     collapsed = omitted.length;
     truncated = full && nodes.length > hardCap ? Math.max(nodes.length - hardCap, 0) : 0;
-    notes.push(full && nodes.length > hardCap
-      ? `volume acima do teto duro (${hardCap} nos); a view foi resumida sem perder sintaxe`
-      : `view reduzida para ${keepNodes.length} nos para manter legibilidade`);
+    notes.push(formatReductionNote(noteKind, keepNodes.length, hardCap, full && nodes.length > hardCap));
 
     const grouped = groupOmittedByType(omitted);
     for (const [type, bucket] of grouped.entries()) {
@@ -811,8 +931,8 @@ function reduceGraph(nodes, edges, opts = {}) {
     for (const edge of edges) {
       const fromKept = keptIds.has(edge.from);
       const toKept = keptIds.has(edge.to);
-      const fromReplacement = fromKept ? edge.from : `summary:${inferNodeType(edge.from, nodes)}`;
-      const toReplacement = toKept ? edge.to : `summary:${inferNodeType(edge.to, nodes)}`;
+      const fromReplacement = fromKept ? edge.from : `summary:${inferNodeType(edge.from, nodeById)}`;
+      const toReplacement = toKept ? edge.to : `summary:${inferNodeType(edge.to, nodeById)}`;
       if (!keptIds.has(fromReplacement) || !keptIds.has(toReplacement) || fromReplacement === toReplacement) {
         continue;
       }
@@ -828,7 +948,11 @@ function reduceGraph(nodes, edges, opts = {}) {
     edges = [...edges]
       .sort((a, b) => edgePriority(b) - edgePriority(a) || `${a.from}:${a.to}:${a.label}`.localeCompare(`${b.from}:${b.to}:${b.label}`))
       .slice(0, maxEdges);
-    notes.push(`arestas reduzidas para ${edges.length} para preservar leitura`);
+    notes.push(noteKind === 'timeout'
+      ? `fallback parcial por timeout: arestas reduzidas para ${edges.length}`
+      : noteKind === 'budget'
+        ? `colapso preventivo: arestas reduzidas para ${edges.length}`
+        : `arestas reduzidas para ${edges.length} para preservar leitura`);
   }
 
   const connectedIds = new Set(edges.flatMap(edge => [edge.from, edge.to]));
@@ -889,22 +1013,29 @@ function scoreText(query, values) {
   let best = 0;
 
   for (const value of values || []) {
-    if (!value) {
+    if (!value || best >= 115) {
       continue;
     }
     const normalizedValue = normalizeText(value);
-    const valueTokens = tokenize(value);
 
     if (normalizedValue === normalizedQuery) {
-      best = Math.max(best, 160);
+      return 160;
     }
     if (normalizedValue.includes(normalizedQuery) || normalizedQuery.includes(normalizedValue)) {
-      best = Math.max(best, 115);
+      best = 115;
+      continue;
     }
 
+    const valueTokens = tokenize(value);
     let tokenMatches = 0;
     for (const queryToken of queryTokens) {
-      if (valueTokens.some(token => token === queryToken || token.includes(queryToken) || queryToken.includes(token) || similarity(token, queryToken) >= 0.72)) {
+      if (valueTokens.some(token => {
+        if (token === queryToken || token.includes(queryToken) || queryToken.includes(token)) {
+          return true;
+        }
+        const lenRatio = Math.min(token.length, queryToken.length) / Math.max(token.length, queryToken.length);
+        return lenRatio >= 0.5 && similarity(token, queryToken) >= 0.72;
+      })) {
         tokenMatches++;
       }
     }
@@ -1028,32 +1159,38 @@ function mergeFlowMatches(primary, secondary) {
   return [...byId.values()];
 }
 
-function expandSubjectIds(subjectIds, relations, depth, limit) {
+function expandSubjectIds(subjectIds, relationIndex, depth, limit) {
   const seed = new Set(subjectIds || []);
   const expanded = new Set(seed);
   let frontier = [...seed];
 
   for (let currentDepth = 0; currentDepth < depth && frontier.length > 0 && expanded.size < limit; currentDepth++) {
-    const next = [];
-    for (const rel of relations || []) {
-      if (!IMPORTANT_REL_TYPES.has(rel.rel)) {
-        continue;
-      }
-      const fromId = rel.from_id || rel.from;
-      const toId = rel.to_id || rel.to;
-      if (frontier.includes(fromId) && !expanded.has(toId)) {
-        expanded.add(toId);
-        next.push(toId);
-      }
-      if (frontier.includes(toId) && !expanded.has(fromId)) {
-        expanded.add(fromId);
-        next.push(fromId);
+    const next = new Set();
+    for (const subjectId of frontier) {
+      const adjacent = collectIndexedRelations(relationIndex, [subjectId], 'both');
+      for (const rel of adjacent) {
+        if (!IMPORTANT_REL_TYPES.has(rel.rel)) {
+          continue;
+        }
+        const fromId = rel.from_id || rel.from;
+        const toId = rel.to_id || rel.to;
+        if (fromId === subjectId && !expanded.has(toId)) {
+          expanded.add(toId);
+          next.add(toId);
+        }
+        if (toId === subjectId && !expanded.has(fromId)) {
+          expanded.add(fromId);
+          next.add(fromId);
+        }
+        if (expanded.size >= limit) {
+          break;
+        }
       }
       if (expanded.size >= limit) {
         break;
       }
     }
-    frontier = next;
+    frontier = [...next];
   }
 
   return [...expanded];
@@ -1184,8 +1321,8 @@ function groupOmittedByType(nodes) {
   return grouped;
 }
 
-function inferNodeType(id, nodes) {
-  const node = (nodes || []).find(item => item.id === id);
+function inferNodeType(id, nodeById) {
+  const node = nodeById instanceof Map ? nodeById.get(id) : (nodeById || []).find(item => item.id === id);
   return node ? node.type : inferTypeFromId(id);
 }
 
@@ -1209,11 +1346,11 @@ function inferTypeFromId(id) {
   }
 }
 
-function computeNodeWeight(node, edges, focusNodeIds) {
+function computeNodeWeight(node, degreeByNode, focusNodeIds) {
   let score = focusNodeIds.has(node.id) ? 100 : 0;
   score += node.selected ? 30 : 0;
   score += node.role === 'entry' ? 24 : 0;
-  score += edges.filter(edge => edge.from === node.id || edge.to === node.id).length * 3;
+  score += (degreeByNode.get(node.id) || 0) * 3;
 
   switch (node.type) {
     case 'job':
@@ -1273,6 +1410,132 @@ function typeLabel(type) {
     case 'summary': return 'resumo';
     default: return type || 'artefato';
   }
+}
+
+function resolveViewProfile(kind, opts = {}) {
+  const partial = Boolean(opts.partial);
+  const base = VIEW_PROFILES[partial ? `${kind}_partial` : kind] || VIEW_PROFILES[kind] || VIEW_PROFILES.focused;
+  if (!opts.full) {
+    return { ...base };
+  }
+  return {
+    ...base,
+    flowLimit: Math.min((base.flowLimit || 6) + 2, 16),
+    subjectLimit: base.subjectLimit ? Math.min(base.subjectLimit * 2, 96) : undefined,
+    rawNodeBudget: Math.min(base.rawNodeBudget * 2, 480),
+    rawEdgeBudget: Math.min(base.rawEdgeBudget * 2, 1800),
+    relationAugmentLimit: Math.min(base.relationAugmentLimit * 2, 2400),
+    maxProgramsPerStep: Math.min(base.maxProgramsPerStep * 2, 24),
+    maxProceduresPerStep: Math.min(base.maxProceduresPerStep * 2, 20),
+    maxDataPerStep: Math.min(base.maxDataPerStep * 2, 28),
+    maxAggregatePrograms: Math.min(base.maxAggregatePrograms * 2, 48),
+    maxAggregateProcedures: Math.min(base.maxAggregateProcedures * 2, 36),
+    maxAggregateData: Math.min(base.maxAggregateData * 2, 48),
+  };
+}
+
+function buildGenerationMeta(kind, profile, opts = {}) {
+  return {
+    kind,
+    mode: opts.partial ? 'fallback' : 'normal',
+    reason: opts.reason || null,
+    profile: profile.name,
+    timeout_ms: opts.timeoutMs || null,
+    depth: opts.depth || null,
+  };
+}
+
+function appendGenerationNotes(notes, opts = {}, profile = {}) {
+  const merged = [...(notes || [])];
+  if (opts.partial) {
+    merged.push(`view gerada em modo parcial com perfil ${profile.name}${opts.reason ? ` (${opts.reason})` : ''}.`);
+  }
+  return merged;
+}
+
+function collectIndexedRelations(relationIndex, subjectIds, direction = 'both') {
+  const collected = [];
+  const seen = new Set();
+  const subjects = subjectIds || [];
+  for (const subjectId of subjects) {
+    if (!subjectId) {
+      continue;
+    }
+    if (direction !== 'upstream') {
+      for (const rel of relationIndex.outEdges.get(subjectId) || []) {
+        const key = `${rel.from_id || rel.from}:${rel.to_id || rel.to}:${rel.rel}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          collected.push(rel);
+        }
+      }
+    }
+    if (direction !== 'downstream') {
+      for (const rel of relationIndex.inEdges.get(subjectId) || []) {
+        const key = `${rel.from_id || rel.from}:${rel.to_id || rel.to}:${rel.rel}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          collected.push(rel);
+        }
+      }
+    }
+  }
+  return collected;
+}
+
+function applyRawGraphBudget(rawGraph, opts = {}) {
+  const profile = opts.profile || VIEW_PROFILES.focused;
+  const nodes = dedupeNodes(rawGraph.nodes || []);
+  const nodeIds = new Set(nodes.map(node => node.id));
+  const edges = dedupeEdges((rawGraph.edges || []).filter(edge => nodeIds.has(edge.from) && nodeIds.has(edge.to)));
+
+  const reduction = reduceGraph(nodes, edges, {
+    limit: profile.rawNodeBudget,
+    hardCap: profile.rawNodeBudget,
+    focusNodeIds: opts.focusNodeIds || new Set(),
+    full: true,
+    noteKind: opts.degraded ? 'timeout' : 'budget',
+  });
+
+  const maxEdges = Math.min(profile.rawEdgeBudget, reduction.edges.length);
+  const prunedEdges = reduction.edges.length > maxEdges
+    ? [...reduction.edges]
+      .sort((a, b) => edgePriority(b) - edgePriority(a) || `${a.from}:${a.to}:${a.label}`.localeCompare(`${b.from}:${b.to}:${b.label}`))
+      .slice(0, maxEdges)
+    : reduction.edges;
+
+  if (reduction.edges.length > maxEdges) {
+    reduction.notes.push(opts.degraded
+      ? `fallback parcial por timeout: arestas pre-reduzidas para ${maxEdges}`
+      : `colapso preventivo: arestas pre-reduzidas para ${maxEdges}`);
+  }
+
+  return {
+    nodes: reduction.nodes,
+    edges: prunedEdges,
+    notes: reduction.notes,
+  };
+}
+
+function buildDegreeIndex(edges) {
+  const degrees = new Map();
+  for (const edge of edges || []) {
+    degrees.set(edge.from, (degrees.get(edge.from) || 0) + 1);
+    degrees.set(edge.to, (degrees.get(edge.to) || 0) + 1);
+  }
+  return degrees;
+}
+
+function formatReductionNote(kind, keptCount, hardCap, hardTruncation) {
+  if (kind === 'timeout') {
+    return `fallback parcial por timeout: view resumida para ${keptCount} nos`;
+  }
+  if (kind === 'budget') {
+    return `colapso preventivo: view reduzida para ${keptCount} nos antes da diagramacao`;
+  }
+  return hardTruncation
+    ? `volume acima do teto duro (${hardCap} nos); a view foi resumida sem perder sintaxe`
+    : `view reduzida para ${keptCount} nos para manter legibilidade`;
 }
 
 module.exports = {

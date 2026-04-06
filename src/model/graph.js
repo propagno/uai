@@ -46,13 +46,15 @@ function buildIndex(relations) {
 /**
  * BFS / DFS impact traversal starting from a set of names.
  * direction: 'downstream' (who is called), 'upstream' (who calls), 'both'
+ * maxResults: hard cap on the result array size (default: Infinity for backward compat)
  */
-function traverse(startNames, { outEdges, inEdges }, direction = 'both', maxDepth = 4) {
+function traverse(startNames, { outEdges, inEdges }, direction = 'both', maxDepth = 4, maxResults = Infinity) {
   const visited = new Map(); // name → depth
   const result  = [];
   const queue   = startNames.map(n => ({ name: n, depth: 0 }));
 
   while (queue.length > 0) {
+    if (result.length >= maxResults) break;
     const { name, depth } = queue.shift();
     if (visited.has(name) || depth > maxDepth) continue;
     visited.set(name, depth);
