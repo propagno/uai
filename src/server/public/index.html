@@ -6,357 +6,919 @@
   <title>UAI — Unidade de Análise Inteligente</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
   <style>
+    /* ── Reset & base ───────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    body {
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      background: #0f1117;
-      color: #e2e8f0;
-      display: flex;
-      height: 100vh;
-      overflow: hidden;
+    :root {
+      --bg:        #080a12;
+      --surface:   #0e1120;
+      --surface2:  #141728;
+      --surface3:  #1b1f35;
+      --border:    #1e2440;
+      --border2:   #262c4a;
+      --text:      #dde3f0;
+      --text2:     #8891b0;
+      --text3:     #4d5470;
+      --accent:    #6366f1;
+      --accent2:   #818cf8;
+      --accent-bg: rgba(99,102,241,0.12);
+
+      --c-program:   #6366f1;
+      --c-copybook:  #22d3a6;
+      --c-job:       #f59e0b;
+      --c-table:     #f87171;
+      --c-screen:    #a78bfa;
+      --c-procedure: #38bdf8;
+      --c-dataset:   #fb923c;
+      --c-default:   #64748b;
+
+      --sidebar-w: 260px;
+      --detail-w:  340px;
+      --radius:    8px;
+      --radius-sm: 5px;
     }
 
-    /* ── Sidebar ─────────────────────────────────────────── */
+    html, body { height: 100%; overflow: hidden; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    /* ── Scrollbar ────────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+    /* ── Left sidebar ─────────────────────────────────────────────── */
     #sidebar {
-      width: 300px;
-      min-width: 300px;
-      background: #1a1d27;
-      border-right: 1px solid #2d3148;
+      width: var(--sidebar-w);
+      min-width: var(--sidebar-w);
+      background: var(--surface);
+      border-right: 1px solid var(--border);
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      z-index: 10;
     }
 
-    #sidebar-header {
-      padding: 16px;
-      border-bottom: 1px solid #2d3148;
-      background: #13162a;
+    /* Logo */
+    #logo {
+      padding: 16px 18px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
     }
 
-    #sidebar-header h1 {
+    #logo-icon {
+      width: 32px; height: 32px;
+      background: var(--accent-bg);
+      border: 1px solid rgba(99,102,241,0.3);
+      border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px; font-weight: 900;
+      color: var(--accent2);
+      letter-spacing: -1px;
+      flex-shrink: 0;
+    }
+
+    #logo-text { flex: 1; overflow: hidden; }
+    #logo-text h1 { font-size: 14px; font-weight: 700; color: var(--text); line-height: 1.2; }
+    #logo-text p  { font-size: 10px; color: var(--text3); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* Stats cards */
+    #stats-cards {
+      padding: 12px 12px 10px;
+      border-bottom: 1px solid var(--border);
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .stat-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px 10px;
+    }
+
+    .stat-card .sc-val {
       font-size: 18px;
       font-weight: 700;
-      color: #7c83ff;
-      letter-spacing: 0.5px;
+      color: var(--text);
+      line-height: 1.1;
     }
 
-    #sidebar-header p {
-      font-size: 11px;
-      color: #64748b;
+    .stat-card .sc-label {
+      font-size: 10px;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
       margin-top: 2px;
     }
 
-    #filters {
-      padding: 12px 16px;
-      border-bottom: 1px solid #2d3148;
+    .stat-card.accent { border-color: rgba(99,102,241,0.3); }
+    .stat-card.accent .sc-val { color: var(--accent2); }
+
+    /* Sidebar scrollable area */
+    #sidebar-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
       display: flex;
       flex-direction: column;
+      gap: 14px;
+    }
+
+    .filter-section { }
+
+    .filter-section-header {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Toggle chips */
+    .chip-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px 3px 6px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1.5px solid transparent;
+      background: var(--surface2);
+      color: var(--text2);
+      transition: all 0.15s;
+      user-select: none;
+    }
+
+    .chip:hover { border-color: var(--border2); color: var(--text); }
+
+    .chip.on {
+      background: var(--chip-bg, var(--accent-bg));
+      border-color: var(--chip-color, var(--accent));
+      color: var(--chip-color, var(--accent2));
+    }
+
+    .chip-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--chip-color, var(--accent));
+      flex-shrink: 0;
+    }
+
+    /* Slider */
+    .slider-row {
+      display: flex;
+      align-items: center;
       gap: 8px;
     }
 
-    #filters label { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
-
-    input[type=text], input[type=range], select {
-      width: 100%;
-      background: #0f1117;
-      border: 1px solid #2d3148;
-      color: #e2e8f0;
-      border-radius: 4px;
-      padding: 6px 8px;
-      font-size: 13px;
+    .slider-row input[type=range] {
+      flex: 1;
+      height: 4px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: var(--border2);
+      border-radius: 99px;
       outline: none;
     }
 
-    input[type=text]:focus, select:focus { border-color: #7c83ff; }
+    .slider-row input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+      border: 2px solid var(--surface);
+    }
 
-    #filters .row { display: flex; gap: 8px; align-items: center; }
-    #filters .row input[type=range] { flex: 1; padding: 0; }
-    #filters .row span { font-size: 12px; color: #94a3b8; width: 32px; text-align: right; }
+    .slider-val {
+      font-size: 11px;
+      color: var(--text2);
+      width: 36px;
+      text-align: right;
+      flex-shrink: 0;
+    }
 
-    button {
-      background: #7c83ff;
+    /* Load button */
+    #btn-load {
+      width: 100%;
+      padding: 9px;
+      background: var(--accent);
       color: #fff;
       border: none;
-      border-radius: 4px;
-      padding: 7px 12px;
-      cursor: pointer;
+      border-radius: var(--radius-sm);
       font-size: 13px;
-      width: 100%;
       font-weight: 600;
-    }
-    button:hover { background: #6169f0; }
-    button.secondary { background: #2d3148; color: #94a3b8; }
-    button.secondary:hover { background: #363b5a; }
-
-    #stats {
-      padding: 8px 16px;
-      border-bottom: 1px solid #2d3148;
-      font-size: 11px;
-      color: #64748b;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
       display: flex;
-      gap: 12px;
-    }
-
-    #stats b { color: #94a3b8; }
-
-    /* ── Detail panel ────────────────────────────────────── */
-    #detail {
-      flex: 1;
-      overflow-y: auto;
-      padding: 12px 16px;
-    }
-
-    #detail h2 { font-size: 14px; color: #7c83ff; margin-bottom: 6px; }
-    #detail h3 { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.4px; margin: 10px 0 4px; }
-    #detail p  { font-size: 12px; color: #cbd5e1; line-height: 1.5; }
-
-    .badge {
-      display: inline-block;
-      font-size: 10px;
-      padding: 1px 6px;
-      border-radius: 999px;
-      font-weight: 600;
-      margin-left: 4px;
-    }
-
-    .rel-list { list-style: none; }
-    .rel-list li {
-      font-size: 11px;
-      padding: 3px 0;
-      border-bottom: 1px solid #1e2235;
-      display: flex;
-      justify-content: space-between;
       align-items: center;
+      justify-content: center;
       gap: 6px;
     }
-    .rel-list li span.name {
-      color: #7c83ff;
-      cursor: pointer;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .rel-list li span.name:hover { text-decoration: underline; }
-    .rel-list li span.rel-type { color: #475569; font-size: 10px; flex-shrink: 0; }
 
-    #source-preview {
-      background: #0f1117;
-      border: 1px solid #2d3148;
-      border-radius: 4px;
-      padding: 8px;
-      font-family: 'Courier New', monospace;
+    #btn-load:hover { background: #5254d4; }
+    #btn-load:active { transform: scale(0.98); }
+
+    /* Graph status bar */
+    #graph-status {
+      padding: 6px 12px;
+      border-top: 1px solid var(--border);
+      background: var(--surface2);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 11px;
+      color: var(--text3);
+      flex-shrink: 0;
+    }
+
+    #graph-status b { color: var(--text2); }
+
+    #trunc-badge {
+      display: none;
+      align-items: center;
+      gap: 4px;
+      background: rgba(245,158,11,0.12);
+      border: 1px solid rgba(245,158,11,0.3);
+      color: #f59e0b;
+      border-radius: 99px;
+      padding: 1px 7px;
       font-size: 10px;
-      color: #94a3b8;
-      max-height: 200px;
-      overflow-y: auto;
-      white-space: pre;
-      margin-top: 4px;
+      font-weight: 600;
+      cursor: help;
     }
 
-    /* ── Graph area ──────────────────────────────────────── */
+    #trunc-badge.visible { display: flex; }
+
+    /* ── Main area ─────────────────────────────────────────────────── */
     #main {
       flex: 1;
       display: flex;
       flex-direction: column;
+      position: relative;
       overflow: hidden;
     }
 
+    /* Toolbar */
     #toolbar {
-      background: #1a1d27;
-      border-bottom: 1px solid #2d3148;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
       padding: 8px 12px;
       display: flex;
       gap: 8px;
       align-items: center;
       flex-shrink: 0;
+      z-index: 5;
     }
 
-    #toolbar button { width: auto; padding: 5px 10px; font-size: 12px; }
-
-    #search-bar {
+    #search-wrap {
       flex: 1;
       position: relative;
+      max-width: 400px;
     }
 
-    #search-bar input {
-      width: 100%;
-      padding: 5px 8px;
-      font-size: 12px;
+    #search-icon {
+      position: absolute;
+      left: 9px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text3);
+      font-size: 13px;
+      pointer-events: none;
     }
+
+    #search-input {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: var(--radius-sm);
+      padding: 6px 8px 6px 28px;
+      font-size: 12px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    #search-input::placeholder { color: var(--text3); }
+    #search-input:focus { border-color: var(--accent); }
 
     #search-results {
       position: absolute;
-      top: calc(100% + 2px);
+      top: calc(100% + 4px);
       left: 0;
       right: 0;
-      background: #1a1d27;
-      border: 1px solid #2d3148;
-      border-radius: 4px;
+      background: var(--surface2);
+      border: 1px solid var(--border2);
+      border-radius: var(--radius);
       z-index: 100;
-      max-height: 220px;
+      max-height: 260px;
       overflow-y: auto;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
       display: none;
     }
 
     #search-results.visible { display: block; }
 
     .search-item {
+      padding: 8px 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: background 0.1s;
+    }
+
+    .search-item:hover { background: var(--surface3); }
+    .search-item:not(:last-child) { border-bottom: 1px solid var(--border); }
+
+    .search-item .si-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .search-item .si-name { flex: 1; color: var(--text); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .search-item .si-type { color: var(--text3); font-size: 10px; flex-shrink: 0; }
+
+    .tb-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text2);
+      border-radius: var(--radius-sm);
       padding: 6px 10px;
       font-size: 12px;
       cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
       display: flex;
-      justify-content: space-between;
-      gap: 8px;
+      align-items: center;
+      gap: 5px;
     }
-    .search-item:hover { background: #2d3148; }
-    .search-item .si-name { color: #e2e8f0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .search-item .si-type { color: #475569; font-size: 10px; flex-shrink: 0; }
 
+    .tb-btn:hover { background: var(--surface3); border-color: var(--border2); color: var(--text); }
+    .tb-btn.danger:hover { border-color: rgba(248,113,113,0.4); color: #f87171; }
+
+    /* Graph canvas */
     #cy {
       flex: 1;
-      background: #0f1117;
+      background: var(--bg);
+      background-image:
+        radial-gradient(circle at 1px 1px, var(--border) 1px, transparent 0);
+      background-size: 28px 28px;
     }
 
+    /* Floating controls */
+    #float-controls {
+      position: absolute;
+      right: 12px;
+      bottom: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      z-index: 5;
+    }
+
+    .fc-btn {
+      width: 32px; height: 32px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text2);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      transition: all 0.15s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    }
+
+    .fc-btn:hover { background: var(--surface2); color: var(--text); border-color: var(--border2); }
+
+    /* Loading overlay */
     #loading {
       position: absolute;
       inset: 0;
       display: flex;
       align-items: center;
       justify-content: center;
-      background: #0f1117;
-      z-index: 10;
-      font-size: 14px;
-      color: #64748b;
+      background: rgba(8,10,18,0.85);
+      backdrop-filter: blur(4px);
+      z-index: 20;
       flex-direction: column;
-      gap: 8px;
+      gap: 12px;
     }
 
+    #loading.hidden { display: none; }
+
     .spinner {
-      width: 28px; height: 28px;
-      border: 3px solid #2d3148;
-      border-top-color: #7c83ff;
+      width: 36px; height: 36px;
+      border: 3px solid var(--border2);
+      border-top-color: var(--accent);
       border-radius: 50%;
-      animation: spin 0.8s linear infinite;
+      animation: spin 0.7s linear infinite;
     }
+
+    #loading-text { font-size: 13px; color: var(--text2); }
+    #loading-sub  { font-size: 11px; color: var(--text3); }
 
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* ── Entity type colors ───────────────────────────── */
-    :root {
-      --c-program:   #7c83ff;
-      --c-copybook:  #34d399;
-      --c-job:       #f59e0b;
-      --c-table:     #f87171;
-      --c-screen:    #a78bfa;
-      --c-procedure: #38bdf8;
-      --c-unknown:   #64748b;
+    /* Empty state */
+    #empty-state {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+      z-index: 2;
     }
 
-    .type-dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      display: inline-block;
-      margin-right: 4px;
+    #empty-state.visible { display: flex; }
+    #empty-state .es-icon { font-size: 40px; opacity: 0.2; }
+    #empty-state p { font-size: 13px; color: var(--text3); }
+    #empty-state small { font-size: 11px; color: var(--text3); opacity: 0.7; }
+
+    /* ── Right detail panel ────────────────────────────────────────── */
+    #detail-panel {
+      width: var(--detail-w);
+      min-width: var(--detail-w);
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transform: translateX(var(--detail-w));
+      transition: transform 0.2s ease;
+      z-index: 10;
+    }
+
+    #detail-panel.open { transform: translateX(0); }
+
+    #dp-header {
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
       flex-shrink: 0;
+    }
+
+    #dp-type-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      margin-top: 4px;
+      flex-shrink: 0;
+    }
+
+    #dp-title-wrap { flex: 1; overflow: hidden; }
+    #dp-title { font-size: 14px; font-weight: 700; color: var(--text); word-break: break-all; line-height: 1.3; }
+    #dp-subtitle { font-size: 11px; color: var(--text3); margin-top: 2px; }
+
+    #dp-close {
+      background: none;
+      border: none;
+      color: var(--text3);
+      cursor: pointer;
+      font-size: 16px;
+      padding: 2px;
+      line-height: 1;
+      flex-shrink: 0;
+      transition: color 0.1s;
+    }
+    #dp-close:hover { color: var(--text); }
+
+    #dp-badges {
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+
+    .dp-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-size: 10px;
+      font-weight: 600;
+    }
+
+    .dp-badge.type   { background: var(--badge-bg); color: var(--badge-color); }
+    .dp-badge.conf   { background: rgba(99,102,241,0.12); color: var(--accent2); }
+    .dp-badge.infer  { background: rgba(100,116,139,0.15); color: #94a3b8; }
+
+    #dp-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    #dp-loading {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 0;
+      color: var(--text3);
+      font-size: 12px;
+    }
+
+    #dp-loading .mini-spin {
+      width: 14px; height: 14px;
+      border: 2px solid var(--border2);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+
+    .dp-section { }
+    .dp-section-title {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+      margin-bottom: 6px;
+    }
+
+    .dp-file {
+      font-size: 10px;
+      color: var(--text3);
+      word-break: break-all;
+      padding: 4px 8px;
+      background: var(--surface2);
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+    }
+
+    .rel-list { display: flex; flex-direction: column; gap: 2px; }
+
+    .rel-item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 8px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+
+    .rel-item:hover { background: var(--surface2); }
+
+    .rel-item-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .rel-item-name { flex: 1; font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rel-item-badge {
+      font-size: 9px;
+      color: var(--text3);
+      background: var(--surface3);
+      padding: 1px 5px;
+      border-radius: 99px;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
+    .source-preview {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px;
+      font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+      font-size: 10px;
+      color: var(--text2);
+      max-height: 200px;
+      overflow-y: auto;
+      white-space: pre;
+      line-height: 1.6;
+    }
+
+    .para-list { display: flex; flex-direction: column; gap: 2px; }
+    .para-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+      background: var(--surface2);
+    }
+    .para-item-name { font-size: 11px; color: var(--text); font-family: monospace; }
+    .para-item-line { font-size: 10px; color: var(--text3); }
+
+    /* ── Keyboard hint ─────────────────────────────────────────────── */
+    #kbd-hint {
+      position: absolute;
+      bottom: 50px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 6px 12px;
+      font-size: 10px;
+      color: var(--text3);
+      display: none;
+      gap: 12px;
+      z-index: 5;
+      white-space: nowrap;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    }
+
+    #kbd-hint.visible { display: flex; }
+    #kbd-hint kbd {
+      background: var(--surface3);
+      border: 1px solid var(--border2);
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-size: 10px;
+      color: var(--text2);
     }
   </style>
 </head>
 <body>
 
-<!-- Sidebar -->
-<div id="sidebar">
-  <div id="sidebar-header">
-    <h1>UAI</h1>
-    <p>Unidade de Análise Inteligente</p>
+<!-- ── Left sidebar ─────────────────────────────────────────────── -->
+<aside id="sidebar">
+
+  <div id="logo">
+    <div id="logo-icon">U</div>
+    <div id="logo-text">
+      <h1>UAI</h1>
+      <p>Unidade de Análise Inteligente</p>
+    </div>
   </div>
 
-  <div id="filters">
-    <label>Tipos de entidade</label>
-    <select id="filter-type" multiple style="height:90px">
-      <option value="program"   selected>Programas</option>
-      <option value="copybook"  selected>Copybooks</option>
-      <option value="job"       selected>Jobs</option>
-      <option value="table"     selected>Tabelas</option>
-      <option value="screen"    selected>Telas</option>
-      <option value="procedure" selected>Procedures</option>
-    </select>
+  <div id="stats-cards">
+    <div class="stat-card accent">
+      <div class="sc-val" id="sc-entities">—</div>
+      <div class="sc-label">entidades</div>
+    </div>
+    <div class="stat-card">
+      <div class="sc-val" id="sc-relations">—</div>
+      <div class="sc-label">relações</div>
+    </div>
+    <div class="stat-card">
+      <div class="sc-val" id="sc-jobs">—</div>
+      <div class="sc-label">jobs</div>
+    </div>
+    <div class="stat-card">
+      <div class="sc-val" id="sc-programs">—</div>
+      <div class="sc-label">programas</div>
+    </div>
+  </div>
 
-    <label>Tipos de relação</label>
-    <select id="filter-rel" multiple style="height:70px">
-      <option value="CALLS"    selected>CALLS</option>
-      <option value="INCLUDES" selected>INCLUDES</option>
-      <option value="EXECUTES" selected>EXECUTES</option>
-      <option value="READS"    selected>READS</option>
-      <option value="WRITES"   selected>WRITES</option>
-      <option value="UPDATES"  selected>UPDATES</option>
-    </select>
+  <div id="sidebar-scroll">
 
-    <label>Confiança mínima</label>
-    <div class="row">
-      <input type="range" id="filter-conf" min="0" max="1" step="0.05" value="0">
-      <span id="conf-label">0.0</span>
+    <div class="filter-section">
+      <div class="filter-section-header">
+        Tipos de entidade
+        <span style="font-size:10px;color:var(--accent2);cursor:pointer" id="toggle-all-types">todos</span>
+      </div>
+      <div class="chip-group" id="type-chips"></div>
     </div>
 
-    <button id="btn-load">Carregar grafo</button>
-    <button class="secondary" id="btn-reset-layout">Reorganizar layout</button>
+    <div class="filter-section">
+      <div class="filter-section-header">
+        Tipos de relação
+        <span style="font-size:10px;color:var(--accent2);cursor:pointer" id="toggle-all-rels">todos</span>
+      </div>
+      <div class="chip-group" id="rel-chips"></div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-section-header">Confiança mínima</div>
+      <div class="slider-row">
+        <input type="range" id="filter-conf" min="0" max="1" step="0.05" value="0">
+        <span class="slider-val" id="conf-label">0.00</span>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-section-header">Limite de nós (top por grau)</div>
+      <div class="slider-row">
+        <input type="range" id="filter-limit" min="50" max="2000" step="50" value="500">
+        <span class="slider-val" id="limit-label">500</span>
+      </div>
+    </div>
+
+    <button id="btn-load">
+      <span>⟳</span> Carregar grafo
+    </button>
+
   </div>
 
-  <div id="stats">
+  <div id="graph-status">
     <span><b id="stat-nodes">0</b> nós</span>
     <span><b id="stat-edges">0</b> arestas</span>
+    <div id="trunc-badge" title="">⚠ truncado</div>
   </div>
 
-  <div id="detail">
-    <p style="color:#475569; font-size:12px">Clique em um nó para ver os detalhes.</p>
-  </div>
-</div>
+</aside>
 
-<!-- Main graph area -->
-<div id="main" style="position:relative">
+<!-- ── Main graph area ──────────────────────────────────────────── -->
+<div id="main">
+
   <div id="toolbar">
-    <div id="search-bar">
-      <input type="text" id="search-input" placeholder="Buscar entidade... (Enter)">
+    <div id="search-wrap">
+      <span id="search-icon">🔍</span>
+      <input type="text" id="search-input" placeholder="Buscar entidade…  (Ctrl+K)">
       <div id="search-results"></div>
     </div>
-    <button id="btn-fit">Ajustar</button>
-    <button id="btn-export-svg" class="secondary">Exportar SVG</button>
+
+    <button class="tb-btn" id="btn-fit" title="Ajustar grafo (F)">⤢ Ajustar</button>
+    <button class="tb-btn" id="btn-cose" title="Layout COSE force-directed">⟡ Layout</button>
+    <button class="tb-btn" id="btn-export" title="Exportar SVG">↓ SVG</button>
+    <button class="tb-btn" id="btn-kbd" title="Atalhos">? Ajuda</button>
+  </div>
+
+  <div id="cy"></div>
+
+  <div id="empty-state">
+    <div class="es-icon">🔬</div>
+    <p>Nenhum dado encontrado</p>
+    <small>Ajuste os filtros e clique em Carregar grafo</small>
+  </div>
+
+  <div id="float-controls">
+    <button class="fc-btn" id="fc-zoom-in"  title="Zoom in (+)">+</button>
+    <button class="fc-btn" id="fc-zoom-out" title="Zoom out (-)">−</button>
+    <button class="fc-btn" id="fc-center"   title="Centralizar">⊙</button>
+  </div>
+
+  <div id="kbd-hint">
+    <span><kbd>Ctrl+K</kbd> buscar</span>
+    <span><kbd>F</kbd> ajustar</span>
+    <span><kbd>+</kbd><kbd>-</kbd> zoom</span>
+    <span><kbd>Esc</kbd> fechar</span>
   </div>
 
   <div id="loading">
     <div class="spinner"></div>
-    <span>Carregando modelo...</span>
+    <div id="loading-text">Carregando modelo…</div>
+    <div id="loading-sub"></div>
   </div>
 
-  <div id="cy"></div>
 </div>
 
-<script>
-/* ── Config ──────────────────────────────────────────────────────── */
-const BASE = '';  // same origin
+<!-- ── Right detail panel ───────────────────────────────────────── -->
+<aside id="detail-panel">
 
+  <div id="dp-header">
+    <div id="dp-type-dot"></div>
+    <div id="dp-title-wrap">
+      <div id="dp-title">—</div>
+      <div id="dp-subtitle">—</div>
+    </div>
+    <button id="dp-close" title="Fechar (Esc)">✕</button>
+  </div>
+
+  <div id="dp-badges"></div>
+
+  <div id="dp-body">
+    <div id="dp-loading" style="display:none">
+      <div class="mini-spin"></div>
+      <span>Carregando detalhes…</span>
+    </div>
+    <div id="dp-content"></div>
+  </div>
+
+</aside>
+
+<script>
+'use strict';
+/* ═══════════════════════════════════════════════════════════════════
+   Config
+═══════════════════════════════════════════════════════════════════ */
 const TYPE_COLORS = {
-  program:   '#7c83ff',
-  copybook:  '#34d399',
+  program:   '#6366f1',
+  copybook:  '#22d3a6',
   job:       '#f59e0b',
   table:     '#f87171',
   screen:    '#a78bfa',
   procedure: '#38bdf8',
+  dataset:   '#fb923c',
+  step:      '#64748b',
 };
 
 const REL_COLORS = {
-  CALLS:    '#7c83ff',
-  INCLUDES: '#34d399',
-  EXECUTES: '#f59e0b',
-  READS:    '#38bdf8',
-  WRITES:   '#f87171',
-  UPDATES:  '#fb923c',
+  CALLS:       '#6366f1',
+  CALLS_PROC:  '#818cf8',
+  INCLUDES:    '#22d3a6',
+  EXECUTES:    '#f59e0b',
+  READS:       '#38bdf8',
+  WRITES:      '#f87171',
+  UPDATES:     '#fb923c',
 };
 
-/* ── Cytoscape instance ──────────────────────────────────────────── */
+const TYPE_LABELS = {
+  program:   'Programas',
+  copybook:  'Copybooks',
+  job:       'Jobs',
+  table:     'Tabelas',
+  screen:    'Telas',
+  procedure: 'Procedures',
+  dataset:   'Datasets',
+  step:      'Steps',
+};
+
+const REL_LABELS = {
+  CALLS:    'CALLS',
+  CALLS_PROC:'CALLS_PROC',
+  INCLUDES: 'INCLUDES',
+  EXECUTES: 'EXECUTES',
+  READS:    'READS',
+  WRITES:   'WRITES',
+  UPDATES:  'UPDATES',
+};
+
+function typeColor(t) { return TYPE_COLORS[t] || '#64748b'; }
+function relColor(r)  { return REL_COLORS[r]  || '#334155'; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Chip setup
+═══════════════════════════════════════════════════════════════════ */
+function buildChips(containerId, entries, colorFn) {
+  const wrap = document.getElementById(containerId);
+  wrap.innerHTML = '';
+  for (const [key, label] of Object.entries(entries)) {
+    const c = document.createElement('span');
+    c.className = 'chip on';
+    c.dataset.val = key;
+    const color = colorFn(key);
+    c.style.setProperty('--chip-color', color);
+    c.style.setProperty('--chip-bg', color + '18');
+    c.innerHTML = `<span class="chip-dot"></span>${label}`;
+    c.addEventListener('click', () => {
+      c.classList.toggle('on');
+    });
+    wrap.appendChild(c);
+  }
+}
+
+function getChipValues(containerId) {
+  return [...document.querySelectorAll(`#${containerId} .chip.on`)].map(c => c.dataset.val);
+}
+
+function toggleAllChips(containerId, on) {
+  document.querySelectorAll(`#${containerId} .chip`).forEach(c => {
+    if (on) c.classList.add('on'); else c.classList.remove('on');
+  });
+}
+
+buildChips('type-chips', TYPE_LABELS, typeColor);
+buildChips('rel-chips',  REL_LABELS,  relColor);
+
+document.getElementById('toggle-all-types').addEventListener('click', () => {
+  const allOn = [...document.querySelectorAll('#type-chips .chip')].every(c => c.classList.contains('on'));
+  toggleAllChips('type-chips', !allOn);
+});
+document.getElementById('toggle-all-rels').addEventListener('click', () => {
+  const allOn = [...document.querySelectorAll('#rel-chips .chip')].every(c => c.classList.contains('on'));
+  toggleAllChips('rel-chips', !allOn);
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   Cytoscape
+═══════════════════════════════════════════════════════════════════ */
 let cy = null;
 
-function initCy(elements) {
+function initCy(elements, layoutName = 'grid') {
   if (cy) cy.destroy();
 
   cy = cytoscape({
@@ -366,17 +928,21 @@ function initCy(elements) {
       {
         selector: 'node',
         style: {
-          'background-color': ele => TYPE_COLORS[ele.data('type')] || '#64748b',
-          'label':            'data(label)',
-          'color':            '#e2e8f0',
-          'font-size':        10,
-          'text-valign':      'bottom',
-          'text-margin-y':    4,
-          'width':            24,
-          'height':           24,
-          'border-width':     ele => ele.data('inferred') ? 2 : 0,
-          'border-color':     '#475569',
-          'border-style':     'dashed',
+          'background-color':  ele => typeColor(ele.data('type')),
+          'label':             'data(label)',
+          'color':             '#dde3f0',
+          'font-size':         9,
+          'text-valign':       'bottom',
+          'text-margin-y':     5,
+          'text-max-width':    80,
+          'text-wrap':         'ellipsis',
+          'width':             ele => nodeSize(ele),
+          'height':            ele => nodeSize(ele),
+          'border-width':      ele => ele.data('inferred') ? 1.5 : 0,
+          'border-color':      '#475569',
+          'border-style':      'dashed',
+          'transition-property': 'background-color, border-width, width, height',
+          'transition-duration': '0.15s',
         },
       },
       {
@@ -385,259 +951,459 @@ function initCy(elements) {
           'border-width': 3,
           'border-color': '#fff',
           'border-style': 'solid',
+          'z-index':      10,
         },
+      },
+      {
+        selector: 'node.dimmed',
+        style: { 'opacity': 0.15 },
+      },
+      {
+        selector: 'node.highlighted',
+        style: { 'border-width': 2, 'border-color': '#fbbf24', 'border-style': 'solid' },
       },
       {
         selector: 'edge',
         style: {
-          'line-color':         ele => REL_COLORS[ele.data('rel')] || '#2d3148',
-          'target-arrow-color': ele => REL_COLORS[ele.data('rel')] || '#2d3148',
+          'line-color':         ele => relColor(ele.data('rel')),
+          'target-arrow-color': ele => relColor(ele.data('rel')),
           'target-arrow-shape': 'triangle',
           'curve-style':        'bezier',
           'width':              1.5,
-          'opacity':            0.6,
-          'font-size':          9,
-          'color':              '#94a3b8',
+          'opacity':            0.5,
+          'font-size':          8,
+          'color':              '#64748b',
+          'arrow-scale':        0.8,
         },
       },
       {
         selector: 'edge:selected',
-        style: { 'opacity': 1, 'width': 3 },
+        style: { 'opacity': 1, 'width': 2.5, 'z-index': 5 },
+      },
+      {
+        selector: 'edge.dimmed',
+        style: { 'opacity': 0.06 },
+      },
+      {
+        selector: 'edge.highlighted',
+        style: { 'opacity': 1, 'width': 2 },
       },
     ],
-    layout: { name: 'cose', animate: false, randomize: true, nodeRepulsion: 8000, padding: 30 },
+    layout: layoutName === 'cose'
+      ? { name: 'cose', animate: false, randomize: true, nodeRepulsion: 10000, padding: 30, numIter: 500 }
+      : { name: 'grid', animate: false, padding: 20 },
+    wheelSensitivity: 0.3,
   });
 
-  cy.on('tap', 'node', evt => showDetail(evt.target.data()));
-  cy.on('tap', evt => { if (evt.target === cy) clearDetail(); });
+  cy.on('tap', 'node', evt => openDetail(evt.target.data()));
+  cy.on('tap', evt => { if (evt.target === cy) closeDetail(); });
+  cy.on('mouseover', 'node', evt => highlightNeighbourhood(evt.target));
+  cy.on('mouseout',  'node', () => clearHighlight());
+
+  const empty = document.getElementById('empty-state');
+  empty.classList.toggle('visible', elements.length === 0);
 }
 
-/* ── Load graph ──────────────────────────────────────────────────── */
+function nodeSize(ele) {
+  const type = ele.data('type');
+  if (type === 'job')       return 28;
+  if (type === 'program')   return 22;
+  if (type === 'table')     return 20;
+  if (type === 'screen')    return 20;
+  if (type === 'procedure') return 18;
+  if (type === 'copybook')  return 16;
+  return 16;
+}
+
+function highlightNeighbourhood(node) {
+  if (!cy) return;
+  const neighbourhood = node.closedNeighbourhood();
+  cy.elements().not(neighbourhood).addClass('dimmed');
+  neighbourhood.addClass('highlighted');
+  neighbourhood.removeClass('dimmed');
+}
+
+function clearHighlight() {
+  if (!cy) return;
+  cy.elements().removeClass('dimmed highlighted');
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Load graph
+═══════════════════════════════════════════════════════════════════ */
 async function loadGraph() {
-  showLoading(true);
+  showLoading(true, 'Consultando API…');
 
-  const types   = [...document.getElementById('filter-type').selectedOptions].map(o => o.value);
-  const rels    = [...document.getElementById('filter-rel').selectedOptions].map(o => o.value);
+  const types   = getChipValues('type-chips');
+  const rels    = getChipValues('rel-chips');
   const minConf = document.getElementById('filter-conf').value;
+  const limit   = document.getElementById('filter-limit').value;
 
-  const params = new URLSearchParams({
-    type:    types.join(','),
-    rel:     rels.join(','),
-    minConf,
-  });
+  const params = new URLSearchParams({ type: types.join(','), rel: rels.join(','), minConf, limit });
 
   try {
-    const data = await fetch(`${BASE}/api/graph?${params}`).then(r => r.json());
+    setLoadingSub(`Carregando até ${limit} nós…`);
+    const data = await fetch(`/api/graph?${params}`).then(r => r.json());
 
     const elements = [
       ...data.nodes.map(n => ({
-        data: { id: n.id, label: n.label, type: n.type, file: n.file, confidence: n.confidence, inferred: n.inferred },
+        data: { id: n.id, label: n.label || n.name, type: n.type, file: n.file, confidence: n.confidence, inferred: n.inferred },
       })),
       ...data.edges.map(e => ({
         data: { source: e.source, target: e.target, rel: e.rel, confidence: e.confidence },
       })),
     ];
 
-    initCy(elements);
+    setLoadingSub('Renderizando…');
+    // Slight delay so the browser can repaint the loading text before heavy work
+    await sleep(30);
+
+    initCy(elements, data.nodes.length > 100 ? 'grid' : 'cose');
+
     document.getElementById('stat-nodes').textContent = data.stats.nodes;
     document.getElementById('stat-edges').textContent = data.stats.edges;
+
+    const trunc = document.getElementById('trunc-badge');
+    if (data.stats.truncated) {
+      trunc.title = `Modelo tem ${data.stats.total} entidades; exibindo os ${data.stats.nodes} mais conectados. Reduza os filtros ou aumente o limite.`;
+      trunc.classList.add('visible');
+    } else {
+      trunc.classList.remove('visible');
+    }
   } catch (err) {
-    alert('Erro ao carregar grafo: ' + err.message);
+    showError('Erro ao carregar grafo: ' + err.message);
   }
 
   showLoading(false);
 }
 
-/* ── Detail panel ─────────────────────────────────────────────────── */
-async function showDetail(data) {
-  const panel = document.getElementById('detail');
+/* ═══════════════════════════════════════════════════════════════════
+   Stats on init
+═══════════════════════════════════════════════════════════════════ */
+async function loadStats() {
+  try {
+    const s = await fetch('/api/stats').then(r => r.json());
+    document.getElementById('sc-entities').textContent  = fmt(s.entities  || 0);
+    document.getElementById('sc-relations').textContent = fmt(s.relations || 0);
+    document.getElementById('sc-jobs').textContent      = fmt((s.byType && s.byType.job)     || 0);
+    document.getElementById('sc-programs').textContent  = fmt((s.byType && s.byType.program) || 0);
+  } catch (_) { /* stats are optional */ }
+}
 
-  const color = TYPE_COLORS[data.type] || '#64748b';
-  const conf  = (data.confidence || 0).toFixed(2);
+/* ═══════════════════════════════════════════════════════════════════
+   Detail panel
+═══════════════════════════════════════════════════════════════════ */
+async function openDetail(nodeData) {
+  const panel  = document.getElementById('detail-panel');
+  const color  = typeColor(nodeData.type);
 
-  panel.innerHTML = `
-    <h2>
-      <span class="type-dot" style="background:${color}"></span>
-      ${esc(data.label || data.id)}
-      <span class="badge" style="background:${color}20;color:${color}">${esc(data.type)}</span>
-    </h2>
-    <p style="font-size:11px;color:#475569">Confiança: ${conf}${data.inferred ? ' · <i>inferido</i>' : ''}</p>
-    ${data.file ? `<p style="font-size:10px;color:#475569;word-break:break-all;margin-top:2px">${esc(data.file)}</p>` : ''}
-    <p style="margin-top:8px; color:#475569; font-size:11px">Carregando relações...</p>
+  // Header
+  document.getElementById('dp-type-dot').style.background = color;
+  document.getElementById('dp-title').textContent    = nodeData.label || nodeData.id;
+  document.getElementById('dp-subtitle').textContent = nodeData.id !== nodeData.label ? nodeData.id : '';
+
+  // Badges
+  const conf = (nodeData.confidence || 0).toFixed(2);
+  document.getElementById('dp-badges').innerHTML = `
+    <span class="dp-badge type" style="--badge-bg:${color}18;--badge-color:${color};background:${color}18;color:${color}">${esc(nodeData.type)}</span>
+    <span class="dp-badge conf">conf. ${conf}</span>
+    ${nodeData.inferred ? '<span class="dp-badge infer">inferido</span>' : ''}
   `;
 
+  // Show panel
+  panel.classList.add('open');
+
+  // Body — show loading
+  const dpLoading = document.getElementById('dp-loading');
+  const dpContent = document.getElementById('dp-content');
+  dpLoading.style.display = 'flex';
+  dpContent.innerHTML = '';
+
   try {
-    const res = await fetch(`${BASE}/api/program/${encodeURIComponent(data.id)}`).then(r => r.json());
-    renderDetail(panel, data, res);
+    const res = await fetch(`/api/program/${encodeURIComponent(nodeData.id)}`).then(r => r.json());
+    dpLoading.style.display = 'none';
+    if (res.error) {
+      renderDetailFromGraph(dpContent, nodeData);
+    } else {
+      renderDetailFull(dpContent, nodeData, res);
+    }
   } catch (_) {
-    // Non-program node — show edges only from graph
-    const outgoing = cy.edges(`[source="${data.id}"]`).map(e => ({ rel: e.data('rel'), to: e.data('target'), confidence: e.data('confidence') }));
-    const incoming = cy.edges(`[target="${data.id}"]`).map(e => ({ rel: e.data('rel'), from: e.data('source'), confidence: e.data('confidence') }));
-    renderDetailSimple(panel, data, outgoing, incoming);
+    dpLoading.style.display = 'none';
+    renderDetailFromGraph(dpContent, nodeData);
   }
 }
 
-function renderDetail(panel, data, res) {
-  const color = TYPE_COLORS[data.type] || '#64748b';
-  const conf  = (data.confidence || 0).toFixed(2);
+function renderDetailFull(container, nodeData, res) {
+  const parts = [];
 
-  const outgoing = (res.outgoing || []).slice(0, 30);
-  const incoming = (res.incoming || []).slice(0, 30);
+  // File path
+  if (nodeData.file) {
+    parts.push(`
+      <div class="dp-section">
+        <div class="dp-section-title">Arquivo</div>
+        <div class="dp-file">${esc(nodeData.file)}</div>
+      </div>`);
+  }
 
-  panel.innerHTML = `
-    <h2>
-      <span class="type-dot" style="background:${color}"></span>
-      ${esc(data.label || data.id)}
-      <span class="badge" style="background:${color}20;color:${color}">${esc(data.type)}</span>
-    </h2>
-    <p style="font-size:11px;color:#475569">Confiança: ${conf}${data.inferred ? ' · <i>inferido</i>' : ''}</p>
-    ${data.file ? `<p style="font-size:10px;color:#475569;word-break:break-all;margin-top:2px">${esc(data.file)}</p>` : ''}
+  // Outgoing
+  const out = (res.outgoing || []).slice(0, 40);
+  if (out.length) {
+    parts.push(`
+      <div class="dp-section">
+        <div class="dp-section-title">Chama / usa (${out.length})</div>
+        <div class="rel-list">${out.map(r => relItem(r.to_id || r.to, r.to_label || r.to, r.rel, r.confidence)).join('')}</div>
+      </div>`);
+  }
 
-    ${outgoing.length ? `
-      <h3>Chama / usa (${outgoing.length})</h3>
-      <ul class="rel-list">${outgoing.map(r => `
-        <li>
-          <span class="name" onclick="focusNode('${esc(r.to_id || r.to)}')">${esc(r.to_label || r.to)}</span>
-          <span class="rel-type">${esc(r.rel)} ${(r.confidence||0).toFixed(2)}</span>
-        </li>`).join('')}
-      </ul>
-    ` : ''}
+  // Incoming
+  const inc = (res.incoming || []).slice(0, 40);
+  if (inc.length) {
+    parts.push(`
+      <div class="dp-section">
+        <div class="dp-section-title">Chamado por (${inc.length})</div>
+        <div class="rel-list">${inc.map(r => relItem(r.from_id || r.from, r.from_label || r.from, r.rel, r.confidence)).join('')}</div>
+      </div>`);
+  }
 
-    ${incoming.length ? `
-      <h3>Chamado por (${incoming.length})</h3>
-      <ul class="rel-list">${incoming.map(r => `
-        <li>
-          <span class="name" onclick="focusNode('${esc(r.from_id || r.from)}')">${esc(r.from_label || r.from)}</span>
-          <span class="rel-type">${esc(r.rel)}</span>
-        </li>`).join('')}
-      </ul>
-    ` : ''}
+  // Paragraphs
+  if (res.flow && (res.flow.paragraphs || []).length) {
+    const paras = res.flow.paragraphs.slice(0, 30);
+    parts.push(`
+      <div class="dp-section">
+        <div class="dp-section-title">Parágrafos (${paras.length})</div>
+        <div class="para-list">${paras.map(p => `
+          <div class="para-item">
+            <span class="para-item-name">${esc(p.name)}</span>
+            <span class="para-item-line">L${p.line}</span>
+          </div>`).join('')}</div>
+      </div>`);
+  }
 
-    ${res.source ? `
-      <h3>Código-fonte (primeiras 200 linhas)</h3>
-      <div id="source-preview">${esc(res.source.slice(0, 3000))}</div>
-    ` : ''}
+  // Source
+  if (res.source) {
+    parts.push(`
+      <div class="dp-section">
+        <div class="dp-section-title">Código-fonte (200 linhas)</div>
+        <div class="source-preview">${esc(res.source.slice(0, 4000))}</div>
+      </div>`);
+  }
 
-    ${res.flow && res.flow.paragraphs ? `
-      <h3>Parágrafos (${res.flow.paragraphs.length})</h3>
-      <ul class="rel-list">${res.flow.paragraphs.slice(0, 20).map(p => `
-        <li><span style="font-size:11px;color:#94a3b8">${esc(p.name)}</span>
-            <span class="rel-type">linha ${p.line}</span></li>`).join('')}
-      </ul>
-    ` : ''}
-  `;
+  container.innerHTML = parts.join('') || '<p style="color:var(--text3);font-size:12px">Sem detalhes adicionais.</p>';
+  attachRelListeners(container);
 }
 
-function renderDetailSimple(panel, data, outgoing, incoming) {
-  const color = TYPE_COLORS[data.type] || '#64748b';
-  panel.innerHTML = `
-    <h2>
-      <span class="type-dot" style="background:${color}"></span>
-      ${esc(data.id)}
-      <span class="badge" style="background:${color}20;color:${color}">${esc(data.type)}</span>
-    </h2>
-    ${outgoing.length ? `
-      <h3>Saídas</h3>
-      <ul class="rel-list">${outgoing.map(r => `
-        <li><span class="name" onclick="focusNode('${esc(r.to_id || r.to)}')">${esc(r.to_label || r.to)}</span>
-            <span class="rel-type">${esc(r.rel)}</span></li>`).join('')}
-      </ul>` : ''}
-    ${incoming.length ? `
-      <h3>Entradas</h3>
-      <ul class="rel-list">${incoming.map(r => `
-        <li><span class="name" onclick="focusNode('${esc(r.from_id || r.from)}')">${esc(r.from_label || r.from)}</span>
-            <span class="rel-type">${esc(r.rel)}</span></li>`).join('')}
-      </ul>` : ''}
-  `;
+function renderDetailFromGraph(container, nodeData) {
+  if (!cy) return;
+  const node    = cy.$(`#${CSS.escape(nodeData.id)}`);
+  const outEdges = node.connectedEdges(`[source="${nodeData.id}"]`);
+  const incEdges = node.connectedEdges(`[target="${nodeData.id}"]`);
+  const out = outEdges.map(e => ({ id: e.data('target'), label: e.data('target'), rel: e.data('rel') }));
+  const inc = incEdges.map(e => ({ id: e.data('source'), label: e.data('source'), rel: e.data('rel') }));
+
+  const parts = [];
+  if (nodeData.file) parts.push(`<div class="dp-section"><div class="dp-section-title">Arquivo</div><div class="dp-file">${esc(nodeData.file)}</div></div>`);
+  if (out.length)    parts.push(`<div class="dp-section"><div class="dp-section-title">Saídas (${out.length})</div><div class="rel-list">${out.map(r => relItem(r.id, r.label, r.rel)).join('')}</div></div>`);
+  if (inc.length)    parts.push(`<div class="dp-section"><div class="dp-section-title">Entradas (${inc.length})</div><div class="rel-list">${inc.map(r => relItem(r.id, r.label, r.rel)).join('')}</div></div>`);
+  container.innerHTML = parts.join('') || '<p style="color:var(--text3);font-size:12px">Sem relações visíveis no grafo atual.</p>';
+  attachRelListeners(container);
 }
 
-function clearDetail() {
-  document.getElementById('detail').innerHTML = '<p style="color:#475569;font-size:12px">Clique em um nó para ver os detalhes.</p>';
+function relItem(id, label, rel, conf) {
+  const color = typeColor(inferType(id));
+  const relBg = relColor(rel);
+  const confStr = conf != null ? ` ${parseFloat(conf).toFixed(2)}` : '';
+  return `
+    <div class="rel-item" data-node-id="${esc(id)}">
+      <div class="rel-item-dot" style="background:${color}"></div>
+      <div class="rel-item-name">${esc(label || id)}</div>
+      <div class="rel-item-badge" style="background:${relBg}20;color:${relBg}">${esc(rel)}${confStr}</div>
+    </div>`;
 }
 
+function attachRelListeners(container) {
+  container.querySelectorAll('.rel-item[data-node-id]').forEach(el => {
+    el.addEventListener('click', () => focusNode(el.dataset.nodeId));
+  });
+}
+
+function closeDetail() {
+  document.getElementById('detail-panel').classList.remove('open');
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Focus node
+═══════════════════════════════════════════════════════════════════ */
 function focusNode(id) {
   if (!cy) return;
   const node = cy.$(`#${CSS.escape(id)}`);
   if (node.length) {
-    cy.animate({ fit: { eles: node, padding: 80 }, duration: 400 });
+    cy.animate({ fit: { eles: node, padding: 120 }, duration: 350 });
+    cy.elements().unselect();
     node.select();
-    showDetail(node.data());
+    openDetail(node.data());
   }
 }
 
-/* ── Search ───────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════
+   Search
+═══════════════════════════════════════════════════════════════════ */
 let searchTimeout = null;
 
 document.getElementById('search-input').addEventListener('input', e => {
   clearTimeout(searchTimeout);
   const q = e.target.value.trim();
-  if (q.length < 2) { hideSearchResults(); return; }
-  searchTimeout = setTimeout(() => doSearch(q), 250);
+  if (q.length < 2) { hideSearch(); return; }
+  searchTimeout = setTimeout(() => doSearch(q), 220);
 });
 
 document.getElementById('search-input').addEventListener('keydown', e => {
-  if (e.key === 'Escape') hideSearchResults();
+  if (e.key === 'Escape') { hideSearch(); e.target.blur(); }
+  if (e.key === 'Enter') {
+    const first = document.querySelector('#search-results .search-item');
+    if (first) first.click();
+  }
 });
 
 async function doSearch(q) {
-  const res = await fetch(`${BASE}/api/search?q=${encodeURIComponent(q)}`).then(r => r.json()).catch(() => []);
+  const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`).then(r => r.json()).catch(() => []);
   const box = document.getElementById('search-results');
-  if (!res.length) { hideSearchResults(); return; }
-  box.innerHTML = res.map(r => `
-    <div class="search-item" onclick="selectSearchResult('${esc(r.id)}')">
-      <span class="si-name">${esc(r.label || r.name)}</span>
-      <span class="si-type">${esc(r.type)}</span>
-    </div>
-  `).join('');
+  if (!res.length) { hideSearch(); return; }
+  box.innerHTML = res.slice(0, 12).map(r => {
+    const color = typeColor(r.type);
+    return `
+      <div class="search-item" data-id="${esc(r.id)}">
+        <div class="si-dot" style="background:${color}"></div>
+        <div class="si-name">${esc(r.label || r.name)}</div>
+        <div class="si-type">${esc(r.type)}</div>
+      </div>`;
+  }).join('');
+  box.querySelectorAll('.search-item').forEach(el => {
+    el.addEventListener('click', () => {
+      hideSearch();
+      document.getElementById('search-input').value = '';
+      focusNode(el.dataset.id);
+    });
+  });
   box.classList.add('visible');
 }
 
-function selectSearchResult(id) {
-  hideSearchResults();
-  document.getElementById('search-input').value = id;
-  focusNode(id);
-}
-
-function hideSearchResults() {
+function hideSearch() {
   document.getElementById('search-results').classList.remove('visible');
 }
 
-/* ── Toolbar ──────────────────────────────────────────────────────── */
+document.addEventListener('click', e => {
+  if (!document.getElementById('search-wrap').contains(e.target)) hideSearch();
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   Toolbar & float controls
+═══════════════════════════════════════════════════════════════════ */
 document.getElementById('btn-load').addEventListener('click', loadGraph);
 
 document.getElementById('btn-fit').addEventListener('click', () => {
   if (cy) cy.fit(undefined, 30);
 });
 
-document.getElementById('btn-reset-layout').addEventListener('click', () => {
+document.getElementById('btn-cose').addEventListener('click', () => {
   if (!cy) return;
-  cy.layout({ name: 'cose', animate: true, randomize: false, nodeRepulsion: 8000, padding: 30 }).run();
+  const n = cy.nodes().length;
+  if (n > 300 && !confirm(`${n} nós — o layout COSE pode demorar. Continuar?`)) return;
+  cy.layout({ name: 'cose', animate: true, randomize: false, nodeRepulsion: 10000, padding: 30 }).run();
 });
 
-document.getElementById('btn-export-svg').addEventListener('click', () => {
+document.getElementById('btn-export').addEventListener('click', () => {
   if (!cy) return;
   const svg  = cy.svg({ scale: 1, full: true });
   const blob = new Blob([svg], { type: 'image/svg+xml' });
-  const a    = document.createElement('a');
-  a.href     = URL.createObjectURL(blob);
-  a.download = 'uai-graph.svg';
+  const a    = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'uai-graph.svg' });
   a.click();
 });
 
+document.getElementById('btn-kbd').addEventListener('click', () => {
+  document.getElementById('kbd-hint').classList.toggle('visible');
+});
+
+document.getElementById('fc-zoom-in').addEventListener('click',  () => cy && cy.zoom({ level: cy.zoom() * 1.25, renderedPosition: { x: cy.width()/2, y: cy.height()/2 } }));
+document.getElementById('fc-zoom-out').addEventListener('click', () => cy && cy.zoom({ level: cy.zoom() * 0.8,  renderedPosition: { x: cy.width()/2, y: cy.height()/2 } }));
+document.getElementById('fc-center').addEventListener('click',   () => cy && cy.fit(undefined, 30));
+document.getElementById('dp-close').addEventListener('click', closeDetail);
+
+/* ═══════════════════════════════════════════════════════════════════
+   Slider labels
+═══════════════════════════════════════════════════════════════════ */
 document.getElementById('filter-conf').addEventListener('input', e => {
   document.getElementById('conf-label').textContent = parseFloat(e.target.value).toFixed(2);
 });
+document.getElementById('filter-limit').addEventListener('input', e => {
+  document.getElementById('limit-label').textContent = e.target.value;
+});
 
-/* ── Utils ────────────────────────────────────────────────────────── */
-function showLoading(v) {
-  document.getElementById('loading').style.display = v ? 'flex' : 'none';
+/* ═══════════════════════════════════════════════════════════════════
+   Keyboard shortcuts
+═══════════════════════════════════════════════════════════════════ */
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    document.getElementById('search-input').focus();
+    document.getElementById('search-input').select();
+  }
+  if (e.key === 'Escape') {
+    hideSearch();
+    closeDetail();
+    document.getElementById('kbd-hint').classList.remove('visible');
+  }
+  if (e.key === 'f' && !isInputFocused()) { if (cy) cy.fit(undefined, 30); }
+  if (e.key === '+' || e.key === '=') { if (cy && !isInputFocused()) cy.zoom({ level: cy.zoom() * 1.2, renderedPosition: { x: cy.width()/2, y: cy.height()/2 } }); }
+  if (e.key === '-') { if (cy && !isInputFocused()) cy.zoom({ level: cy.zoom() * 0.85, renderedPosition: { x: cy.width()/2, y: cy.height()/2 } }); }
+});
+
+function isInputFocused() {
+  const t = document.activeElement && document.activeElement.tagName;
+  return t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT';
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Helpers
+═══════════════════════════════════════════════════════════════════ */
+function showLoading(v, text) {
+  const el = document.getElementById('loading');
+  if (v) {
+    document.getElementById('loading-text').textContent = text || 'Carregando…';
+    document.getElementById('loading-sub').textContent  = '';
+    el.classList.remove('hidden');
+  } else {
+    el.classList.add('hidden');
+  }
+}
+
+function setLoadingSub(text) {
+  document.getElementById('loading-sub').textContent = text;
+}
+
+function showError(msg) {
+  const el = document.getElementById('loading');
+  el.innerHTML = `<div style="font-size:13px;color:#f87171;text-align:center;padding:20px">${esc(msg)}<br><br>
+    <button onclick="location.reload()" style="background:#6366f1;color:#fff;border:none;padding:7px 16px;border-radius:6px;cursor:pointer;font-size:12px">Recarregar</button></div>`;
+}
+
+function inferType(id) {
+  const prefix = String(id || '').split(':')[0];
+  return ['job','step','program','procedure','dataset','table','screen','copybook'].includes(prefix) ? prefix : 'program';
+}
+
+function fmt(n) { return Number(n).toLocaleString('pt-BR'); }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function esc(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
-/* ── Init ─────────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════
+   Init
+═══════════════════════════════════════════════════════════════════ */
+loadStats();
 loadGraph();
 </script>
 </body>

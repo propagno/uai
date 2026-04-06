@@ -84,6 +84,7 @@ function handleGraph(query) {
   const minConf  = parseFloat(query.minConf || '0') || 0;
   const types    = query.type ? query.type.split(',') : null;
   const relTypes = query.rel  ? query.rel.split(',')  : null;
+  const limit    = Math.min(parseInt(query.limit || '500', 10) || 500, 2000);
 
   const filteredEnts = entities.filter(e =>
     (e.confidence || 0) >= minConf &&
@@ -98,7 +99,27 @@ function handleGraph(query) {
     (!relTypes || relTypes.includes(r.rel)),
   );
 
-  const nodes = filteredEnts.map(e => ({
+  // Rank entities by degree so the most connected are shown when truncating
+  const degreeMap = new Map();
+  for (const r of filteredRels) {
+    const f = r.from_id || r.from;
+    const t = r.to_id   || r.to;
+    degreeMap.set(f, (degreeMap.get(f) || 0) + 1);
+    degreeMap.set(t, (degreeMap.get(t) || 0) + 1);
+  }
+
+  const totalEnts = filteredEnts.length;
+  const topEnts   = filteredEnts
+    .slice()
+    .sort((a, b) => (degreeMap.get(b.id) || 0) - (degreeMap.get(a.id) || 0))
+    .slice(0, limit);
+  const topIds = new Set(topEnts.map(e => e.id));
+
+  const topRels = filteredRels.filter(r =>
+    topIds.has(r.from_id || r.from) && topIds.has(r.to_id || r.to),
+  );
+
+  const nodes = topEnts.map(e => ({
     id:         e.id,
     label:      e.label || e.name,
     name:       e.name,
@@ -108,15 +129,24 @@ function handleGraph(query) {
     inferred:   e.inferred || false,
   }));
 
-  const edges = filteredRels.map(r => ({
+  const edges = topRels.map(r => ({
     source:     r.from_id || r.from,
-    target:     r.to_id || r.to,
+    target:     r.to_id   || r.to,
     rel:        r.rel,
     confidence: r.confidence,
     evidence:   (r.evidence && r.evidence[0]) || null,
   }));
 
-  return { nodes, edges, stats: { nodes: nodes.length, edges: edges.length } };
+  return {
+    nodes,
+    edges,
+    stats: {
+      nodes:     nodes.length,
+      edges:     edges.length,
+      total:     totalEnts,
+      truncated: totalEnts > limit,
+    },
+  };
 }
 
 function handleProgram(name) {
