@@ -1,7 +1,7 @@
 <div align="center">
 
 <p align="center">
-  <img src="assets/readme-banner.svg" alt="UAI" width="920" />
+  <img src="https://raw.githubusercontent.com/propagno/uai/main/assets/readme-banner.svg" alt="UAI" width="920" />
 </p>
 
 ### Unidade de Analise Inteligente
