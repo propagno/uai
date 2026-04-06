@@ -1,6 +1,8 @@
 <div align="center">
 
-# UAI
+<p align="center">
+  <img src="assets/readme-banner.svg" alt="UAI" width="920" />
+</p>
 
 ### Unidade de Analise Inteligente
 

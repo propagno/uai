@@ -25,6 +25,7 @@
     ".github/agents",
     ".github/prompts",
     ".github/workflows",
+    "assets",
     "commands",
     "workflows",
     "templates",

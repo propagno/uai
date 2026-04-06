@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="220" viewBox="0 0 920 220" role="img" aria-label="UAI reverse engineering para sistemas legados">
+  <defs>
+    <linearGradient id="uai-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#08131a"/>
+      <stop offset="48%" stop-color="#0d1f29"/>
+      <stop offset="100%" stop-color="#142933"/>
+    </linearGradient>
+    <linearGradient id="uai-accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#4fd1c5"/>
+      <stop offset="100%" stop-color="#f6ad55"/>
+    </linearGradient>
+    <linearGradient id="uai-grid" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#4fd1c5" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#f6ad55" stop-opacity="0.12"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="920" height="220" rx="18" fill="url(#uai-bg)"/>
+  <rect x="2" y="2" width="916" height="216" rx="16" fill="none" stroke="url(#uai-accent)" stroke-width="2" opacity="0.5"/>
+
+  <g opacity="0.35">
+    <path d="M90 38h140M90 62h210M90 86h170M90 110h250M90 134h190M90 158h230" stroke="url(#uai-grid)" stroke-width="2"/>
+    <path d="M690 38h140M620 62h210M660 86h170M580 110h250M640 134h190M600 158h230" stroke="url(#uai-grid)" stroke-width="2"/>
+    <circle cx="76" cy="38" r="4" fill="#4fd1c5"/>
+    <circle cx="76" cy="62" r="4" fill="#4fd1c5"/>
+    <circle cx="76" cy="86" r="4" fill="#4fd1c5"/>
+    <circle cx="76" cy="110" r="4" fill="#4fd1c5"/>
+    <circle cx="76" cy="134" r="4" fill="#4fd1c5"/>
+    <circle cx="76" cy="158" r="4" fill="#4fd1c5"/>
+    <circle cx="844" cy="38" r="4" fill="#f6ad55"/>
+    <circle cx="844" cy="62" r="4" fill="#f6ad55"/>
+    <circle cx="844" cy="86" r="4" fill="#f6ad55"/>
+    <circle cx="844" cy="110" r="4" fill="#f6ad55"/>
+    <circle cx="844" cy="134" r="4" fill="#f6ad55"/>
+    <circle cx="844" cy="158" r="4" fill="#f6ad55"/>
+  </g>
+
+  <text x="460" y="102" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="78" font-weight="800" fill="url(#uai-accent)" letter-spacing="0.16em">UAI</text>
+  <text x="460" y="142" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="18" font-weight="600" fill="#e6edf3">Unidade de Analise Inteligente</text>
+  <text x="460" y="170" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="16" fill="#9fb3c8">Model-Driven · Analysis-Driven · Reverse Engineering</text>
+  <text x="460" y="196" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Consolas,monospace" font-size="13" fill="#7dd3fc">npm install -g uai-cc && uai-cc install --all-agents</text>
+</svg>
