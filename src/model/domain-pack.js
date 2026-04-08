@@ -76,6 +76,57 @@ const PACKS = {
   },
 };
 
+const MODERNIZATION_PACKS = {
+  'azure-java-aks': {
+    id: 'azure-java-aks',
+    label: 'Azure + Java + AKS',
+    runtime: 'Java 21',
+    framework: 'Spring Boot 3',
+    deploy: 'AKS',
+    relational_database: 'Azure SQL',
+    file_staging: 'Azure Blob Storage',
+    messaging: 'Azure Service Bus',
+    api_edge: 'Azure API Management',
+    identity: 'Key Vault + Managed Identity/Entra',
+    observability: 'Azure Monitor + Application Insights',
+    expected_resources: [
+      'aks',
+      'azure_sql',
+      'blob_storage',
+      'service_bus',
+      'api_management',
+      'key_vault',
+      'app_insights',
+    ],
+    service_templates: {
+      intake: {
+        java_component: 'Spring Batch ingestion worker',
+        azure_resources: ['aks', 'blob_storage', 'app_insights', 'key_vault'],
+      },
+      validation: {
+        java_component: 'Spring Boot validation service',
+        azure_resources: ['aks', 'api_management', 'app_insights', 'key_vault'],
+      },
+      processing: {
+        java_component: 'Spring Boot processing service',
+        azure_resources: ['aks', 'api_management', 'app_insights', 'key_vault'],
+      },
+      handoff: {
+        java_component: 'Anti-corruption integration service',
+        azure_resources: ['aks', 'service_bus', 'api_management', 'app_insights', 'key_vault'],
+      },
+      persistence: {
+        java_component: 'Spring Boot persistence service',
+        azure_resources: ['aks', 'azure_sql', 'app_insights', 'key_vault'],
+      },
+      output: {
+        java_component: 'Delivery worker / outbound adapter',
+        azure_resources: ['aks', 'blob_storage', 'service_bus', 'app_insights', 'key_vault'],
+      },
+    },
+  },
+};
+
 function resolveDomainPack(input = {}) {
   const requested = String(input.requested || input.domainPack || 'auto').toLowerCase();
   if (requested && requested !== 'auto') {
@@ -151,6 +202,28 @@ function clonePack(pack) {
   };
 }
 
+function resolveModernizationPack(input = {}) {
+  const requested = String(input.requested || input.target || 'azure-java-aks').toLowerCase();
+  return cloneModernizationPack(MODERNIZATION_PACKS[requested] || MODERNIZATION_PACKS['azure-java-aks']);
+}
+
+function cloneModernizationPack(pack) {
+  if (typeof structuredClone === 'function') {
+    return structuredClone(pack || MODERNIZATION_PACKS['azure-java-aks']);
+  }
+  const source = pack || MODERNIZATION_PACKS['azure-java-aks'];
+  return {
+    ...source,
+    expected_resources: [...(source.expected_resources || [])],
+    service_templates: Object.fromEntries(
+      Object.entries(source.service_templates || {}).map(([key, value]) => [key, {
+        ...value,
+        azure_resources: [...(value.azure_resources || [])],
+      }]),
+    ),
+  };
+}
+
 function normalize(value) {
   return String(value || '')
     .normalize('NFD')
@@ -160,6 +233,7 @@ function normalize(value) {
 
 module.exports = {
   resolveDomainPack,
+  resolveModernizationPack,
   scoreBusinessFit,
   rankTerminalLabel,
   rankHandoffLabel,

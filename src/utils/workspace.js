@@ -11,6 +11,7 @@ const WORKSPACE_DIR = '.uai';
 
 const SUBDIRS = [
   'analysis',
+  'modernization',
   'inventory',
   'cache',
   'model',
@@ -108,12 +109,19 @@ function buildConfig() {
         'actor', 'phase', 'gate', 'decision',
         'business_rule', 'state', 'message', 'transfer',
         'external_system', 'stored_procedure', 'file_layout',
+        'bounded_context', 'service_candidate', 'api_contract',
+        'event_contract', 'batch_worker', 'anti_corruption_layer',
+        'data_product', 'azure_resource', 'java_component',
+        'migration_wave', 'cutover_checkpoint',
       ],
       relations:        [
         'CALLS', 'INCLUDES', 'READS', 'WRITES', 'EXECUTES', 'DEPENDS_ON',
         'VALIDATES', 'ROUTES_TO', 'TRANSITIONS_TO', 'EMITS', 'RECEIVES',
         'TRANSFERS_TO', 'CALLS_SP', 'USES_DLL', 'TRIGGERS', 'GENERATES_REPORT',
         'CHECKPOINTS',
+        'MIGRATES_TO', 'EXTRACTS_TO', 'EXPOSES_API', 'PUBLISHES_EVENT',
+        'SUBSCRIBES_EVENT', 'DEPLOYS_ON', 'REPLACES', 'COEXISTS_WITH',
+        'SYNCS_WITH', 'PROTECTS_WITH', 'CUTS_OVER_AT',
       ],
       require_evidence: true,
     },

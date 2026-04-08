@@ -20,6 +20,8 @@ program.addCommand(require('../src/commands/map'));
 
 // Consulta e analise
 program.addCommand(require('../src/commands/analyze'));
+program.addCommand(require('../src/commands/modernize'));
+program.addCommand(require('../src/commands/modernize-verify'));
 program.addCommand(require('../src/commands/search'));
 program.addCommand(require('../src/commands/impact'));
 program.addCommand(require('../src/commands/lineage'));

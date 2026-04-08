@@ -33,6 +33,8 @@ test('canonical spec exposes required wrapper and workflow commands', () => {
     'uai-model',
     'uai-map',
     'uai-analyze',
+    'uai-modernize',
+    'uai-modernize-verify',
     'uai-flow',
     'uai-export',
     'uai-search',
@@ -48,6 +50,7 @@ test('canonical spec exposes required wrapper and workflow commands', () => {
     'uai-discover',
     'uai-feature-flow',
     'uai-impact-check',
+    'uai-modernization-flow',
     'uai-refresh-docs',
   ]) {
     assert.ok(ids.has(requiredId), `Missing spec ${requiredId}`);

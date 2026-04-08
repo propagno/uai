@@ -68,6 +68,8 @@ uai-cc ingest         -> inventario + extracao
 uai-cc model          -> modelo canonico
 uai-cc map            -> grafos e mapas
 uai-cc analyze        -> dossie autonomo
+uai-cc modernize      -> blueprint Azure/Java
+uai-cc modernize-verify -> aderencia do alvo
 uai-cc search         -> busca
 uai-cc impact         -> analise de impacto
 uai-cc lineage        -> rastreio de dados
@@ -127,6 +129,8 @@ Agentes suportados pelo instalador:
 - `claims` e `citations` passaram a separar claramente **fato** de **inferencia**.
 - `quality-gate.json` agora bloqueia `complete` quando a fase tem lacuna critica sem fato navegavel.
 - `traceability.md` e `evidence.json` agora saem prontos para auditoria e comparacao entre execucoes.
+- `uai-cc modernize` gera blueprint deterministico Azure + Java com service candidates, contratos, dados e ondas.
+- `uai-cc modernize-verify` fecha o loop entre blueprint e repositório alvo Java/Azure.
 
 ---
 
@@ -162,6 +166,12 @@ uai-cc executive --scope system --format both
 
 # 8. Aprofundar uma funcionalidade com dossie autonomo
 uai-cc analyze "NOME-DA-FUNCIONALIDADE" --audience both
+
+# 9. Converter o dossie em blueprint Azure + Java
+uai-cc modernize "NOME-DA-FUNCIONALIDADE" --target azure-java-aks --strategy strangler
+
+# 10. Validar aderencia do repositorio alvo
+uai-cc modernize-verify "NOME-DA-FUNCIONALIDADE" --target-repo ./app-modernizada
 ```
 
 Esse e o fluxo-base do framework. Depois dele, o uso cotidiano passa a ser incremental:
@@ -171,6 +181,8 @@ Esse e o fluxo-base do framework. Depois dele, o uso cotidiano passa a ser incre
 - `uai-cc verify`
 - `uai-cc doc`
 - `uai-cc analyze "<seed>"`
+- `uai-cc modernize "<seed>"`
+- `uai-cc modernize-verify "<seed>" --target-repo <path>`
 
 O `STATE.md` do workspace acompanha esse progresso automaticamente por fase.
 
@@ -190,6 +202,8 @@ Boas praticas:
 - use `verify` antes de confiar em qualquer leitura ampla; ele mostra cobertura, inferencia e gaps
 - rerode `doc` depois de `verify` quando quiser que o `gap-report.md` reflita a cobertura mais recente
 - trate `analyze` como comando principal para modernizacao, entendimento funcional, auditoria e reimplementacao
+- use `modernize` quando a pergunta deixar de ser "como funciona?" e passar a ser "como isso vira servicos Java no Azure?"
+- use `modernize-verify` para medir aderencia entre blueprint e implementacao-alvo real
 
 Seeds recomendados para `analyze`:
 - nome de funcionalidade
@@ -208,11 +222,15 @@ uai-cc analyze JOB1234 --audience tech --seed-type batch
 uai-cc analyze TB_CLIENTE --audience both --seed-type table
 uai-cc analyze "TERMO-DE-CESSAO" --audience both --domain-pack cessao-c3 --terminal PR_TERMO_CESSAO_ASSINA
 uai-cc analyze "TERMO-DE-CESSAO" --audience both --facts-only
+uai-cc modernize "TERMO-DE-CESSAO" --target azure-java-aks --strategy strangler
+uai-cc modernize-verify "TERMO-DE-CESSAO" --target-repo ./target-app
 ```
 
 Use `impact` quando a pergunta for "o que quebra se eu mudar isso?".
 Use `lineage` quando a pergunta for "de onde vem e para onde vai esse dado?".
 Use `analyze` quando a pergunta for "como essa funcionalidade realmente funciona fim a fim?".
+Use `modernize` quando a pergunta for "qual o blueprint Azure + Java para substituir isso com strangler?".
+Use `modernize-verify` quando a pergunta for "o alvo implementado aderiu ao blueprint?".
 
 ---
 
