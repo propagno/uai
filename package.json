@@ -1,6 +1,6 @@
 {
   "name": "uai-cc",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "UAI – Unidade de Análise Inteligente: framework de reverse engineering para sistemas legados COBOL, JCL, VB6, DB2",
   "homepage": "https://github.com/propagno/uai#readme",
   "bugs": {
