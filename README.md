@@ -124,7 +124,7 @@ Agentes suportados pelo instalador:
 ## Destaques desta versao
 
 - `uai-cc analyze` virou o comando principal para gerar dossies de funcionalidade.
-- `domain pack` com `auto`, `generic` e `cessao-c3` para acelerar resolucao e nomenclatura.
+- `domain pack` com `auto`, `generic` e packs especializados para acelerar resolucao e nomenclatura.
 - `reverse trace` passou a priorizar **terminais de negocio** em vez de terminais tecnicos genericos.
 - `claims` e `citations` passaram a separar claramente **fato** de **inferencia**.
 - `quality-gate.json` agora bloqueia `complete` quando a fase tem lacuna critica sem fato navegavel.
@@ -217,13 +217,13 @@ Seeds recomendados para `analyze`:
 Padrao recomendado para aprofundamento:
 
 ```bash
-uai-cc analyze "TERMO-DE-NEGOCIO" --audience both --trace both --mode autonomous --domain-pack auto
+uai-cc analyze "PROCESSAMENTO-CLIENTE" --audience both --trace both --mode autonomous --domain-pack auto
 uai-cc analyze JOB1234 --audience tech --seed-type batch
 uai-cc analyze TB_CLIENTE --audience both --seed-type table
-uai-cc analyze "TERMO-DE-CESSAO" --audience both --domain-pack cessao-c3 --terminal PR_TERMO_CESSAO_ASSINA
-uai-cc analyze "TERMO-DE-CESSAO" --audience both --facts-only
-uai-cc modernize "TERMO-DE-CESSAO" --target azure-java-aks --strategy strangler
-uai-cc modernize-verify "TERMO-DE-CESSAO" --target-repo ./target-app
+uai-cc analyze PGM0001 --audience both --seed-type program --terminal PR_PROCESSAMENTO_FINAL
+uai-cc analyze JOB1234 --audience both --facts-only
+uai-cc modernize JOB1234 --target azure-java-aks --strategy strangler
+uai-cc modernize-verify JOB1234 --target-repo ./target-app
 ```
 
 Use `impact` quando a pergunta for "o que quebra se eu mudar isso?".
@@ -449,7 +449,7 @@ uai-cc search CAMPO-X --json
 Tipos disponiveis: `program`, `job`, `step`, `copybook`, `field`, `table`,
 `column`, `procedure`, `screen`, `class`, `module`, `dataset`.
 
-A busca tambem retorna **fluxos funcionais relacionados** quando o termo aparece
+A busca tambem retorna **fluxos funcionais relacionados** quando o seed aparece
 em entradas batch, telas, cadeia de programas ou dados do fluxo.
 
 ---
@@ -515,9 +515,9 @@ EVALUATE WHEN, CALL estatico e dinamico.
 ## Dossie autonomo de funcionalidade
 
 ```bash
-uai-cc analyze "Termo de Cessao"
-uai-cc analyze CNAB600 --audience both --full
-uai-cc analyze "Termo de Cessao" --domain-pack cessao-c3 --terminal PR_TERMO_CESSAO_ASSINA
+uai-cc analyze "PROCESSAMENTO DE EXTRATO"
+uai-cc analyze JOB1234 --audience both --full
+uai-cc analyze PGM0001 --domain-pack generic --terminal PR_PROCESSAMENTO_FINAL
 ```
 
 Gera um pacote em `.uai/analysis/<slug>/` com:
@@ -541,7 +541,7 @@ Opcoes mais importantes:
 - `--seed-type` para orientar a resolucao funcional do seed
 - `--trace forward|reverse|both` para priorizar a leitura do fluxo
 - `--mode autonomous` para permitir refinamento automatico do recorte
-- `--domain-pack auto|generic|cessao-c3` para aplicar aceleradores de dominio
+- `--domain-pack auto|generic|<pack-especializado>` para aplicar aceleradores de dominio
 - `--terminal <id|label>` para priorizar o terminal de negocio do reverse trace
 - `--facts-only` para manter no dossie apenas fatos com citacao navegavel
 
@@ -592,8 +592,8 @@ Gera documentacao markdown a partir do modelo, sem escrita manual.
 
 ```bash
 uai-cc executive
-uai-cc executive "Termo de Cessao"
-uai-cc executive "NFE CNAB400" --scope both --format both --full
+uai-cc executive "PROCESSAMENTO BATCH"
+uai-cc executive "JOB1234" --scope both --format both --full
 uai-cc executive "PROCESSAMENTO" --scope focused --format mermaid --depth 2
 ```
 
@@ -786,7 +786,7 @@ uai-cc doc
 uai-cc executive --scope system --format both
 
 # 7. Dossie autonomo por funcionalidade
-uai-cc analyze "TERMO-DE-NEGOCIO" --audience both
+uai-cc analyze "PROCESSAMENTO-CLIENTE" --audience both
 
 # --- Consultas complementares ---
 
