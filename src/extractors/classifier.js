@@ -8,6 +8,8 @@ const EXT_MAP = {
   '.cbl':  { dialect: 'cobol',    role: 'program'   },
   '.cob':  { dialect: 'cobol',    role: 'program'   },
   '.jcl':  { dialect: 'jcl',      role: 'job'       },
+  '.proc': { dialect: 'jcl',      role: 'job'       },
+  '.prc':  { dialect: 'jcl',      role: 'job'       },
   '.cpy':  { dialect: 'copybook', role: 'copybook'  },
   '.sql':  { dialect: 'sql',      role: 'script'    },
   '.frm':  { dialect: 'vb6',      role: 'screen'    },

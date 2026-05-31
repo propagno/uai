@@ -120,6 +120,37 @@ test('cobol extractor emits IO and validation heuristics for semantic phases', (
   assert.ok(relations.some(rel => rel.rel === 'WRITES' && rel.to === 'ARQ-SAIDA'));
 });
 
+test('cobol extractor parses embedded CICS blocks and MQ PUT/GET calls', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uai-cobol-cics-mq-'));
+  const filePath = path.join(tmpDir, 'CICSPG.cbl');
+  const content = [
+    ff('IDENTIFICATION DIVISION.'),
+    ff('PROGRAM-ID. CICSPG.'),
+    ff('PROCEDURE DIVISION.'),
+    ff('EXEC CICS LINK'),
+    ff("  PROGRAM('ONLINE1')"),
+    ff('END-EXEC.'),
+    ff('EXEC CICS START TRANSID("TRN1") END-EXEC.'),
+    ff("CALL 'MQPUT' USING A B C."),
+    ff('CALL "MQGET" USING D E F.'),
+  ].join('\n');
+
+  fs.writeFileSync(filePath, content, 'latin1');
+  const { relations } = cobol.extract(filePath, 'hash-cobol-cics-mq');
+
+  // Verify CICS LINK -> CALLS relation
+  assert.ok(relations.some(rel => rel.rel === 'CALLS' && rel.to === 'ONLINE1' && rel.via === 'cics-link'));
+  
+  // Verify CICS START -> TRANSITIONS_TO transaction
+  assert.ok(relations.some(rel => rel.rel === 'TRANSITIONS_TO' && rel.to === 'TRN1' && rel.via === 'cics-start'));
+
+  // Verify MQ PUT -> EMITS relation
+  assert.ok(relations.some(rel => rel.rel === 'EMITS' && rel.to === 'MQ_QUEUE' && rel.api === 'MQPUT'));
+
+  // Verify MQ GET -> RECEIVES relation
+  assert.ok(relations.some(rel => rel.rel === 'RECEIVES' && rel.to === 'MQ_QUEUE' && rel.api === 'MQGET'));
+});
+
 test('jcl extractor preserves immediate comment blocks for job and step descriptions', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uai-jcl-'));
   const filePath = path.join(tmpDir, 'FRECA224.jcl');
@@ -143,6 +174,45 @@ test('jcl extractor preserves immediate comment blocks for job and step descript
   assert.equal(step.description, 'EMITE TERMO DE CESSAO PARA ENVIO');
   assert.equal(step.description_source, 'jcl_comment');
   assert.ok(step.description_evidence.some(item => item.endsWith(':3')));
+});
+
+test('jcl extractor supports procedures and links steps and datasets to the procedure parent', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uai-jcl-proc-'));
+  const filePath = path.join(tmpDir, 'MYPROC.proc');
+  const content = [
+    '//MYPROC   PROC',
+    '//PROCST01 EXEC PGM=PROG1',
+    '//DD1      DD  DSN=MX.PROC.DATA,DISP=SHR',
+  ].join('\n');
+
+  fs.writeFileSync(filePath, content, 'latin1');
+
+  const { entities, relations } = jcl.extract(filePath, 'hash-jcl-proc');
+  const proc = entities.find(entity => entity.type === 'procedure' && entity.name === 'MYPROC');
+  const step = entities.find(entity => entity.type === 'step' && entity.name === 'PROCST01');
+
+  assert.ok(proc);
+  assert.ok(step);
+  assert.equal(step.parent, 'MYPROC');
+  assert.equal(step.parentType, 'procedure');
+
+  assert.ok(relations.some(rel =>
+    rel.rel === 'CONTAINS' &&
+    rel.from === 'MYPROC' &&
+    rel.to === 'PROCST01' &&
+    rel.fromType === 'procedure' &&
+    rel.toType === 'step'
+  ));
+
+  assert.ok(relations.some(rel =>
+    rel.rel === 'READS' &&
+    rel.from === 'PROCST01' &&
+    rel.to === 'MX.PROC.DATA' &&
+    rel.fromType === 'step' &&
+    rel.fromParent === 'MYPROC' &&
+    rel.toType === 'dataset' &&
+    rel.ddname === 'DD1'
+  ));
 });
 
 test('dynamic call resolver upgrades CALL-DYNAMIC into CALLS when flow evidence exists', () => {
@@ -214,4 +284,81 @@ test('vb6 extractor emits DLL, stored procedure and file IO heuristics', () => {
   assert.ok(relations.some(rel => rel.rel === 'USES_DLL' && rel.to === 'ASSINADOR.DLL'));
   assert.ok(relations.some(rel => rel.rel === 'CALLS_SP' && rel.to === 'PR_TERMO_CESSAO_ASSINA'));
   assert.ok(relations.some(rel => rel.rel === 'WRITES' && rel.to === 'TERMO_ASSINADO.TXT'));
+});
+
+test('dataset-linker resolves internal COBOL files to physical datasets via JCL DD parameters', () => {
+  const datasetLinker = require('../src/model/dataset-linker');
+  const cobolContent = [
+    ff('IDENTIFICATION DIVISION.'),
+    ff('PROGRAM-ID. PGMA.'),
+    ff('ENVIRONMENT DIVISION.'),
+    ff('INPUT-OUTPUT SECTION.'),
+    ff('FILE-CONTROL.'),
+    ff('    SELECT FILE-IN ASSIGN TO UT-S-SYSIN01.'),
+    ff('PROCEDURE DIVISION.'),
+    ff('    READ FILE-IN.'),
+  ].join('\n');
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uai-lin-'));
+  const cobolPath = path.join(tmpDir, 'PGMA.cbl');
+  fs.writeFileSync(cobolPath, cobolContent, 'latin1');
+
+  const cobolRes = cobol.extract(cobolPath, 'hash-cob');
+  
+  const assignsRel = cobolRes.relations.find(r => r.rel === 'ASSIGNS_TO');
+  assert.ok(assignsRel);
+  assert.equal(assignsRel.to, 'SYSIN01');
+  assert.equal(assignsRel.file_internal, 'FILE-IN');
+
+  const readsRel = cobolRes.relations.find(r => r.rel === 'READS');
+  assert.ok(readsRel);
+  assert.equal(readsRel.to, 'FILE-IN');
+
+  const jclContent = [
+    '//JOB1    JOB CLASS=A',
+    '//STEP1   EXEC PGM=PGMA',
+    '//SYSIN01 DD DSN=PRD.CLIENTS.FILE,DISP=SHR',
+  ].join('\n');
+  const jclPath = path.join(tmpDir, 'JOB1.jcl');
+  fs.writeFileSync(jclPath, jclContent, 'latin1');
+
+  const jclRes = jcl.extract(jclPath, 'hash-jcl');
+  const stepReads = jclRes.relations.find(r => r.rel === 'READS');
+  assert.ok(stepReads);
+  assert.equal(stepReads.ddname, 'SYSIN01');
+
+  const entities = [...cobolRes.entities, ...jclRes.entities];
+  const relations = [...cobolRes.relations, ...jclRes.relations];
+
+  const linkResult = datasetLinker.link(entities, relations);
+  assert.equal(linkResult.linked, 1);
+  
+  const linked = linkResult.relations.find(r => r.resolved_via === 'jcl-dd-mapping');
+  assert.ok(linked);
+  assert.equal(linked.from, 'PGMA');
+  assert.equal(linked.to, 'PRD.CLIENTS.FILE');
+  assert.equal(linked.rel, 'READS');
+  assert.equal(linked.ddname, 'SYSIN01');
+  assert.equal(linked.file_internal, 'FILE-IN');
+  assert.equal(linked.jcl_step, 'STEP1');
+});
+
+test('cobol extractor parses COPY REPLACING clause correctly', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uai-cobol-copy-'));
+  const filePath = path.join(tmpDir, 'COPYPG.cbl');
+  const content = [
+    ff('IDENTIFICATION DIVISION.'),
+    ff('PROGRAM-ID. COPYPG.'),
+    ff('PROCEDURE DIVISION.'),
+    ff('    COPY CPYA REPLACING ==PREFIX== BY ==CLI==.'),
+  ].join('\n');
+
+  fs.writeFileSync(filePath, content, 'latin1');
+  const { relations } = cobol.extract(filePath, 'hash-cobol-copy');
+
+  const includeRel = relations.find(r => r.rel === 'INCLUDES' && r.to === 'CPYA');
+  assert.ok(includeRel);
+  assert.ok(includeRel.replaces);
+  assert.equal(includeRel.replaces.from, 'PREFIX');
+  assert.equal(includeRel.replaces.to, 'CLI');
 });

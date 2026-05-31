@@ -23,13 +23,15 @@ function extract(filePath, fileHash) {
   const relations = [];
 
   let jobName      = null;
+  let procName     = null;
   let currentStep  = null;
   let stepSeq      = 0;
   let ddOperands   = null;  // accumulate DD continuation lines
   let ddLineNum    = 0;
+  let ddName       = null;
   let pendingCommentBlock = [];
 
-  function flushDD(opds, lineNum) {
+  function flushDD(opds, lineNum, ddname) {
     const opdsUpper = opds.toUpperCase();
     const dsnMatch  = opdsUpper.match(/DSN=([A-Z0-9@#$.()+-]{1,44})/);
     const dispMatch = opdsUpper.match(/DISP=\(?([A-Z]+)/);
@@ -45,8 +47,9 @@ function extract(filePath, fileHash) {
       const isWrite = /^(NEW|MOD|CATLG)$/.test(disp);
       relations.push(makeRel(isWrite ? 'WRITES' : 'READS', currentStep, dsn, filePath, lineNum, 0.85, fileHash, {
         fromType:   'step',
-        fromParent: jobName,
+        fromParent: jobName || procName,
         toType:     'dataset',
+        ddname:     ddname,
       }));
     }
   }
@@ -60,7 +63,7 @@ function extract(filePath, fileHash) {
 
     if (!raw.startsWith('//')) {
       // Flush pending DD if we hit non-// line
-      if (ddOperands !== null) { flushDD(ddOperands, ddLineNum); ddOperands = null; }
+      if (ddOperands !== null) { flushDD(ddOperands, ddLineNum, ddName); ddOperands = null; }
       pendingCommentBlock = [];
       continue;
     }
@@ -82,7 +85,7 @@ function extract(filePath, fileHash) {
     }
 
     // Flush pending DD before processing new statement
-    if (ddOperands !== null) { flushDD(ddOperands, ddLineNum); ddOperands = null; }
+    if (ddOperands !== null) { flushDD(ddOperands, ddLineNum, ddName); ddOperands = null; }
 
     // Fixed-format JCL: NAME is cols 3-10 (0-indexed 2-9), exactly 8 chars
     const rawName    = raw.slice(2, 10).trim();
@@ -99,9 +102,24 @@ function extract(filePath, fileHash) {
     switch (operation) {
       case 'JOB': {
         jobName     = name || path.basename(filePath, path.extname(filePath)).toUpperCase();
+        procName    = null;
         currentStep = null;
         stepSeq     = 0;
         entities.push(makeEntity('job', jobName, filePath, lineNum, 1.0, fileHash, buildCommentMetadata(
+          pendingCommentBlock,
+          filePath,
+          'jcl_comment',
+        )));
+        pendingCommentBlock = [];
+        break;
+      }
+
+      case 'PROC': {
+        procName    = name || path.basename(filePath, path.extname(filePath)).toUpperCase();
+        jobName     = null;
+        currentStep = null;
+        stepSeq     = 0;
+        entities.push(makeEntity('procedure', procName, filePath, lineNum, 1.0, fileHash, buildCommentMetadata(
           pendingCommentBlock,
           filePath,
           'jcl_comment',
@@ -119,18 +137,18 @@ function extract(filePath, fileHash) {
         stepSeq++;
         currentStep = name || `STEP${stepSeq}`;
         entities.push(makeEntity('step', currentStep, filePath, lineNum, 1.0, fileHash, {
-          parent:     jobName,
-          parentType: 'job',
+          parent:     jobName || procName,
+          parentType: jobName ? 'job' : 'procedure',
           seq:        stepSeq,
           ...buildCommentMetadata(pendingCommentBlock, filePath, 'jcl_comment'),
         }));
         pendingCommentBlock = [];
 
-        if (jobName) {
-          relations.push(makeRel('CONTAINS', jobName, currentStep, filePath, lineNum, 1.0, fileHash, {
-            fromType: 'job',
+        if (jobName || procName) {
+          relations.push(makeRel('CONTAINS', jobName || procName, currentStep, filePath, lineNum, 1.0, fileHash, {
+            fromType: jobName ? 'job' : 'procedure',
             toType:   'step',
-            toParent: jobName,
+            toParent: jobName || procName,
             seq:      stepSeq,
           }));
         }
@@ -145,7 +163,7 @@ function extract(filePath, fileHash) {
           const toType  = pgmMatch ? 'program' : 'procedure';
           relations.push(makeRel(relType, currentStep, pgm, filePath, lineNum, 1.0, fileHash, {
             fromType:   'step',
-            fromParent: jobName,
+            fromParent: jobName || procName,
             toType,
           }));
         }
@@ -156,6 +174,7 @@ function extract(filePath, fileHash) {
         // Begin accumulating DD operands (may continue on next lines)
         ddOperands = operands;
         ddLineNum  = lineNum;
+        ddName     = name;
         pendingCommentBlock = [];
         break;
       }
@@ -166,7 +185,7 @@ function extract(filePath, fileHash) {
   }
 
   // Flush final DD if file ends mid-continuation
-  if (ddOperands !== null) flushDD(ddOperands, ddLineNum);
+  if (ddOperands !== null) flushDD(ddOperands, ddLineNum, ddName);
 
   return { entities, relations };
 }

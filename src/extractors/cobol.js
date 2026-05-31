@@ -26,6 +26,9 @@ function extract(filePath, fileHash) {
   let inExecSql  = false;
   let sqlLines   = [];
   let sqlStart   = 0;
+  let inExecCics = false;
+  let cicsLines  = [];
+  let cicsStart  = 0;
   let inProcedureDivision = false;
   let pendingSemanticDescription = null;
 
@@ -79,9 +82,15 @@ function extract(filePath, fileHash) {
 
     // EXEC SQL / END-EXEC handling
     if (upper.startsWith('EXEC SQL')) {
-      inExecSql  = true;
-      sqlStart   = lineNum;
-      sqlLines   = [upper];
+      if (upper.includes('END-EXEC')) {
+        if (programId) {
+          extractEmbeddedSql(upper, programId, filePath, lineNum, fileHash, entities, relations);
+        }
+      } else {
+        inExecSql  = true;
+        sqlStart   = lineNum;
+        sqlLines   = [upper];
+      }
       continue;
     }
     if (inExecSql) {
@@ -95,6 +104,34 @@ function extract(filePath, fileHash) {
         sqlLines = [];
       } else {
         sqlLines.push(upper);
+      }
+      continue;
+    }
+
+    // EXEC CICS / END-EXEC handling
+    if (upper.startsWith('EXEC CICS')) {
+      if (upper.includes('END-EXEC')) {
+        if (programId) {
+          extractEmbeddedCics(upper, programId, filePath, lineNum, fileHash, entities, relations);
+        }
+      } else {
+        inExecCics = true;
+        cicsStart  = lineNum;
+        cicsLines  = [upper];
+      }
+      continue;
+    }
+    if (inExecCics) {
+      if (upper.includes('END-EXEC')) {
+        inExecCics = false;
+        cicsLines.push(upper);
+        const cicsText = cicsLines.join(' ');
+        if (programId) {
+          extractEmbeddedCics(cicsText, programId, filePath, cicsStart, fileHash, entities, relations);
+        }
+        cicsLines = [];
+      } else {
+        cicsLines.push(upper);
       }
       continue;
     }
@@ -118,6 +155,32 @@ function extract(filePath, fileHash) {
 
     if (!programId) continue;
 
+    // SELECT file ASSIGN TO ddname
+    const selectMatch = upper.match(/\bSELECT\s+([A-Z0-9@#$-]+)\s+ASSIGN\s+(?:TO\s+)?(?:'|")?([A-Z0-9@#$-]+)/);
+    if (selectMatch && !COBOL_RESERVED.has(selectMatch[1])) {
+      const rawDd = selectMatch[2];
+      const ddName = rawDd.replace(/^(UT-[SD]-|DA-[SD]-|UT-|DA-)/i, '').trim();
+      relations.push(makeRel('ASSIGNS_TO', programId, ddName, filePath, lineNum, 1.0, fileHash, {
+        fromType: 'program',
+        toType:   'ddname',
+        file_internal: selectMatch[1],
+        ddname: ddName,
+      }));
+      continue;
+    }
+
+    // MQ PUT/GET handling
+    const mqMatch = upper.match(/\bCALL\s+['"](MQPUT|MQGET)['"]/);
+    if (mqMatch) {
+      const isPut = mqMatch[1] === 'MQPUT';
+      relations.push(makeRel(isPut ? 'EMITS' : 'RECEIVES', programId, 'MQ_QUEUE', filePath, lineNum, 0.8, fileHash, {
+        fromType: 'program',
+        toType:   'queue',
+        api:      mqMatch[1],
+      }));
+      continue;
+    }
+
     // CALL 'PROG' or CALL "PROG" or CALL identifier (variable — lower confidence)
     const callLit = upper.match(/\bCALL\s+['"]([A-Z0-9@#$-]+)['"]/);
     if (callLit) {
@@ -137,12 +200,16 @@ function extract(filePath, fileHash) {
       continue;
     }
 
-    // COPY copybook
-    const copyMatch = upper.match(/\bCOPY\s+([A-Z0-9@#$-]+)/);
+    // COPY copybook [REPLACING ...]
+    const copyMatch = upper.match(/\bCOPY\s+([A-Z0-9@#$-]+)(?:\s+REPLACING\s+(?:==)?([A-Z0-9@#$-]+)(?:==)?\s+BY\s+(?:==)?([A-Z0-9@#$-]+)(?:==)?)?/);
     if (copyMatch) {
-      relations.push(makeRel('INCLUDES', programId, copyMatch[1], filePath, lineNum, 1.0, fileHash, {
+      const copybookName = copyMatch[1];
+      const replaceFrom = copyMatch[2] || null;
+      const replaceTo = copyMatch[3] || null;
+      relations.push(makeRel('INCLUDES', programId, copybookName, filePath, lineNum, 1.0, fileHash, {
         fromType: 'program',
         toType:   'copybook',
+        ...(replaceFrom && replaceTo && { replaces: { from: replaceFrom, to: replaceTo } }),
       }));
       continue;
     }
@@ -418,5 +485,36 @@ const SQL_RESERVED = new Set([
   'END-EXEC', 'INCLUDE', 'WHENEVER', 'SQLERROR', 'CONTINUE', 'STOP',
   'SQLCODE', 'SQLSTATE', 'SQLCA', 'USING', 'RETURNING', 'OUTPUT',
 ]);
+
+function extractEmbeddedCics(cicsText, programId, filePath, lineNum, fileHash, entities, relations) {
+  const upper = cicsText.toUpperCase();
+
+  const linkMatch = upper.match(/\bLINK\s+PROGRAM\s*\(\s*['"]?([A-Z0-9@#$-]+)['"]?\s*\)/i);
+  if (linkMatch) {
+    relations.push(makeRel('CALLS', programId, linkMatch[1], filePath, lineNum, 1.0, fileHash, {
+      fromType: 'program',
+      toType:   'program',
+      via:      'cics-link',
+    }));
+  }
+
+  const startMatch = upper.match(/\bSTART\s+TRANSID\s*\(\s*['"]?([A-Z0-9@#$-]+)['"]?\s*\)/i);
+  if (startMatch) {
+    relations.push(makeRel('TRANSITIONS_TO', programId, startMatch[1], filePath, lineNum, 0.9, fileHash, {
+      fromType: 'program',
+      toType:   'transaction',
+      via:      'cics-start',
+    }));
+  }
+
+  const returnMatch = upper.match(/\bRETURN\s+TRANSID\s*\(\s*['"]?([A-Z0-9@#$-]+)['"]?\s*\)/i);
+  if (returnMatch) {
+    relations.push(makeRel('TRANSITIONS_TO', programId, returnMatch[1], filePath, lineNum, 0.9, fileHash, {
+      fromType: 'program',
+      toType:   'transaction',
+      via:      'cics-return',
+    }));
+  }
+}
 
 module.exports = { extract };
