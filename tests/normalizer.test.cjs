@@ -83,27 +83,27 @@ test('normalizer preserves semantic metadata and respects description precedence
     {
       kind: 'entity',
       type: 'program',
-      name: 'FREC1R1O',
-      file: 'C:\\legacy\\FREC1R1O.cbl',
+      name: 'PGM1R1O',
+      file: 'C:\\legacy\\PGM1R1O.cbl',
       line: 1,
       confidence: 1,
       extractor: 'cobol',
       description: 'OBJETIVO: MENU - IDADE',
       description_source: 'cobol_header',
-      description_evidence: ['C:\\legacy\\FREC1R1O.cbl:2'],
+      description_evidence: ['C:\\legacy\\PGM1R1O.cbl:2'],
       semantic_tags: ['menu'],
     },
     {
       kind: 'entity',
       type: 'program',
-      name: 'FREC1R1O',
-      file: 'C:\\legacy\\FREC1R1O-copy.cbl',
+      name: 'PGM1R1O',
+      file: 'C:\\legacy\\PGM1R1O-copy.cbl',
       line: 1,
       confidence: 0.8,
       extractor: 'ingest',
       description: 'Resumo derivado do fluxo',
       description_source: 'derived',
-      description_evidence: ['C:\\legacy\\FREC1R1O-copy.cbl:8'],
+      description_evidence: ['C:\\legacy\\PGM1R1O-copy.cbl:8'],
       semantic_tags: ['fluxo'],
     },
   ];
@@ -111,13 +111,13 @@ test('normalizer preserves semantic metadata and respects description precedence
   fs.writeFileSync(jsonlPath, records.map(record => JSON.stringify(record)).join('\n') + '\n');
 
   const { entities } = normalizer.normalize(jsonlPath);
-  const program = entities['program:FREC1R1O'];
+  const program = entities['program:PGM1R1O'];
 
   assert.equal(program.description, 'OBJETIVO: MENU - IDADE');
   assert.equal(program.description_source, 'cobol_header');
   assert.deepEqual(program.description_evidence.sort(), [
-    'C:\\legacy\\FREC1R1O-copy.cbl:8',
-    'C:\\legacy\\FREC1R1O.cbl:2',
+    'C:\\legacy\\PGM1R1O-copy.cbl:8',
+    'C:\\legacy\\PGM1R1O.cbl:2',
   ]);
   assert.deepEqual(program.semantic_tags.sort(), ['fluxo', 'menu']);
 });

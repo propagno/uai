@@ -9,13 +9,16 @@ const manifest = require('../utils/manifest');
 const entityIdx = require('../model/entity-index');
 const functionalFlow = require('../model/functional-flow');
 const semanticDoc = require('../output/semantic-doc');
+const encyclopedia = require('../output/encyclopedia');
+const narrativeDoc = require('../output/narrative-doc');
 
 const cmd = new Command('doc');
 
 cmd
   .description('Gera documentacao markdown a partir do modelo')
   .option('--only <type>', 'gerar apenas para tipo: programs, jobs, data')
-  .action((opts) => {
+  .option('--narrative', 'enriquece a maquina de estados com significado de negocio via LLM (requer ANTHROPIC_API_KEY)')
+  .action(async (opts) => {
     log.title('UAI Doc');
 
     const model = loadModel();
@@ -55,6 +58,56 @@ cmd
       const gapReport = generateGapReport(entities, relations);
       fs.writeFileSync(path.join(docsDir, 'gap-report.md'), gapReport);
       log.success('gap-report.md gerado');
+      written++;
+
+      // ── Camada de enciclopédia: navegação + agregação + cross-reference ──
+      const catalogsDir = path.join(docsDir, 'catalogs');
+      fs.mkdirSync(catalogsDir, { recursive: true });
+      const catalogs = encyclopedia.generateProgramCatalogs(entities, relations);
+      for (const [name, content] of Object.entries(catalogs.docs)) {
+        fs.writeFileSync(path.join(catalogsDir, name), content);
+        written++;
+      }
+      log.success(`${Object.keys(catalogs.docs).length} catálogos de programas por faixa gerados`);
+
+      fs.writeFileSync(path.join(docsDir, 'cross-reference.md'), encyclopedia.generateCrossReference(entities, relations));
+      log.success('cross-reference.md gerado');
+      written++;
+
+      let stateMeanings = null;
+      if (opts.narrative) {
+        log.step('Inferindo significado de negócio dos estados (LLM)...');
+        const stateData = encyclopedia.buildStateData(entities, relations);
+        const result = await narrativeDoc.enrichStateMachine(stateData);
+        stateMeanings = result.meanings;
+        if (result.warning) log.warn(result.warning);
+      }
+      fs.writeFileSync(path.join(docsDir, 'state-machine.md'), encyclopedia.generateStateMachine(entities, relations, stateMeanings));
+      log.success('state-machine.md gerado');
+      written++;
+
+      fs.writeFileSync(path.join(docsDir, 'ddl-reconstruido.md'), encyclopedia.generateDDL(entities, relations));
+      log.success('ddl-reconstruido.md gerado');
+      written++;
+
+      fs.writeFileSync(path.join(docsDir, 'message-catalog.md'), encyclopedia.generateMessageCatalog(entities, relations));
+      log.success('message-catalog.md gerado');
+      written++;
+
+      // Layouts completos de copybook
+      const copybooks = entities.filter(e => e.type === 'copybook');
+      if (copybooks.length > 0) {
+        const cpyDir = path.join(docsDir, 'copybooks');
+        fs.mkdirSync(cpyDir, { recursive: true });
+        for (const cpy of copybooks) {
+          fs.writeFileSync(path.join(cpyDir, `${cpy.name}.md`), encyclopedia.generateCopybookLayout(entities, cpy.name));
+          written++;
+        }
+        log.success(`${copybooks.length} layouts de copybook gerados`);
+      }
+
+      fs.writeFileSync(path.join(docsDir, 'INDICE-GERAL.md'), encyclopedia.generateMasterIndex(entities, relations, { catalogs: catalogs.summary }));
+      log.success('INDICE-GERAL.md gerado');
       written++;
     }
 

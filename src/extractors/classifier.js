@@ -88,8 +88,9 @@ function classifyByContent(filePath) {
     return { dialect: 'vb6', role: 'class' };
   }
 
-  // Messaging layouts: CIP ACCC messages, CNAB layouts, CVM351, GARQ
-  if (lines.some(l => /\b(ACCC0(13|14|31|32)|CNAB\s*(240|400|500)|CVM[\s-]?351|SCC3GRAD|GARQ2000)\b/i.test(l))) {
+  // Messaging layouts: padrões públicos (CNAB) e marcadores estruturais
+  // genéricos. Códigos de mensagem específicos de projeto ficam fora do fonte.
+  if (lines.some(l => /\b(CNAB\s*(240|400|500)|LAYOUT\s+DE\s+(ARQUIVO|REGISTRO|MENSAGEM)|RECORD\s+LAYOUT|MESSAGE\s+LAYOUT)\b/i.test(l))) {
     return { dialect: 'messaging', role: 'message_layout' };
   }
 

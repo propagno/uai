@@ -3,6 +3,8 @@
 const fs   = require('fs');
 const path = require('path');
 
+const { CONFIDENCE } = require('../model/confidence');
+
 /**
  * COBOL Procedure Division parser.
  *
@@ -61,6 +63,24 @@ function extract(filePath, fileHash) {
   const paragraphs = [];       // { name, line, section }
   const edges      = [];       // { from, to, type, line, confidence }
   const varValues  = new Map(); // varName → Set<literal> (for dynamic CALL resolution)
+  const dynamicCallSites = [];  // resolução em 2ª passada: { ctx, varName, line }
+
+  // ── Phase 1.5: pre-scan da DATA DIVISION por VALUE 'literal' ────────────
+  // Captura `01 WS-PGM PIC X(8) VALUE 'PGMABC'` para resolver CALL dinâmico.
+  for (let i = 0; i < procStart; i++) {
+    const raw = lines[i].replace(/\r$/, '');
+    if (raw.length < 8) continue;
+    const ind = raw[6];
+    if (ind === '*' || ind === '/') continue;
+    const code = raw.slice(7, 72).toUpperCase().trim();
+    const valueMatch = code.match(/^\d{2}\s+([A-Z][A-Z0-9-]*)\b[\s\S]*\bVALUE\s+(?:IS\s+)?['"]([A-Z][A-Z0-9@#$-]{1,29})['"]/);
+    if (valueMatch) {
+      const varName = valueMatch[1];
+      const literal = valueMatch[2];
+      if (!varValues.has(varName)) varValues.set(varName, new Set());
+      varValues.get(varName).add(literal);
+    }
+  }
 
   let currentSection  = null;
   let currentParagraph = null;
@@ -142,15 +162,9 @@ function extract(filePath, fileHash) {
     } else {
       const callVar = upper.match(/\bCALL\s+([A-Z][A-Z0-9-]{1,29})\b/);
       if (callVar && !isCobolKeyword(callVar[1])) {
-        const varName = callVar[1];
-        const resolved = varValues.get(varName);
-        if (resolved && resolved.size > 0) {
-          for (const prog of resolved) {
-            edges.push({ from: ctx, to: prog, type: 'CALL', line: lineNum, confidence: 0.9, dynamic: true });
-          }
-        } else {
-          edges.push({ from: ctx, to: varName, type: 'CALL-DYNAMIC', line: lineNum, confidence: 0.6, dynamic: true });
-        }
+        // Resolução adiada: varValues pode ser preenchido por um MOVE posterior
+        // ou em outro parágrafo. Resolve depois que toda a divisão for lida.
+        dynamicCallSites.push({ ctx, varName: callVar[1], line: lineNum });
       }
     }
 
@@ -176,6 +190,18 @@ function extract(filePath, fileHash) {
     const gotoMatch = upper.match(/\bGO\s+TO\s+([A-Z0-9][A-Z0-9-]+)\b/);
     if (gotoMatch && !isCobolKeyword(gotoMatch[1])) {
       edges.push({ from: ctx, to: gotoMatch[1], type: 'GO-TO', line: lineNum, confidence: 1.0 });
+    }
+  }
+
+  // ── Phase 3: resolve dynamic CALL sites contra varValues completo ───────
+  for (const site of dynamicCallSites) {
+    const resolved = varValues.get(site.varName);
+    if (resolved && resolved.size > 0) {
+      for (const prog of resolved) {
+        edges.push({ from: site.ctx, to: prog, type: 'CALL', line: site.line, confidence: CONFIDENCE.DYNAMIC_RESOLVED, dynamic: true, resolvedFrom: site.varName });
+      }
+    } else {
+      edges.push({ from: site.ctx, to: site.varName, type: 'CALL-DYNAMIC', line: site.line, confidence: 0.6, dynamic: true });
     }
   }
 

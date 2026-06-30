@@ -1,0 +1,63 @@
+# UAI — Domain Pack externo (exemplo)
+#
+# Coloque packs de domínio em `.uai/domain-packs/<id>.yaml`. Eles aceleram a
+# análise com vocabulário do SEU domínio SEM colocar esse vocabulário no código
+# do UAI. `.uai/` é local ao projeto e não é publicado com a ferramenta.
+#
+# Uso:
+#   uai-cc analyze <seed> --domain-pack <id>     # força este pack
+#   uai-cc analyze <seed> --domain-pack auto     # auto-seleção pelo score de termos
+#
+# Auto-seleção: o pack é escolhido quando >= 3 business_terms aparecem no recorte.
+
+id: meu-dominio
+label: Meu Domínio de Negócio
+
+# Termos de negócio: dirigem a auto-seleção e a marcação de tabelas master/control.
+business_terms:
+  - PEDIDO
+  - CLIENTE
+  - FATURA
+
+# Atores do domínio (aparecem nas fases quando este pack é resolvido).
+actors:
+  - Operador desktop
+  - Mainframe batch
+  - Banco de dados
+
+# Sistemas externos (rótulos atribuídos quando aparecem nas relações).
+external_systems:
+  - GATEWAY-PAGTO
+  - SERVICO-FISCAL
+
+# Canais de transferência (handoff entre fases). Strings de regex.
+transfer_channels:
+  - ARQUIVO
+  - FILA
+  - API
+
+# Padrões (regex, case-insensitive) que indicam terminais de negócio no reverse trace.
+terminal_patterns:
+  - '(PR_|SP_|FC_).*(FATURA|PEDIDO|FINAL)'
+
+# Padrões (regex) que indicam handoff entre plataformas.
+handoff_patterns:
+  - '(DESKTOP|MAINFRAME|GATEWAY|FILA|API)'
+
+# Fases esperadas da jornada (sobrescrevem os rótulos genéricos por kind).
+expected_phases:
+  - kind: intake
+    label: Recepcao do pedido
+    objective: Receber o pedido inicial da funcionalidade.
+  - kind: validation
+    label: Validacao e elegibilidade
+    objective: Validar os dados e aplicar regras de negocio.
+  - kind: handoff
+    label: Integracao entre plataformas
+    objective: Transferir o fluxo entre mainframe, desktop e servicos.
+  - kind: persistence
+    label: Persistencia funcional
+    objective: Persistir o resultado e o estado do fluxo.
+  - kind: output
+    label: Entrega e retorno
+    objective: Emitir o artefato final e disponibilizar o retorno.

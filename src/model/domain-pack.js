@@ -1,80 +1,94 @@
 'use strict';
 
-const CESSAO_TERMS = [
-  'TERMO',
-  'CESSAO',
-  'CEDENTE',
-  'CESSIONARIO',
-  'ASSINAT',
-  'ASSINA',
-  'CNAB600',
-  'CNAB400',
-  'CIP',
-  'C3',
-  'ISD',
-  'ACCC013',
-  'ACCC014',
-  'ACCC031',
-  'ACCC032',
-  'SBAT8000',
-  'SBAT8500',
-  'REMESSA',
-  'RETORNO',
-  'TTERMO',
-  'TMOD',
-];
+const fs = require('fs');
+const path = require('path');
+const yaml = require('js-yaml');
 
-const PACKS = {
-  generic: {
-    id: 'generic',
-    label: 'Generic',
-    business_terms: [],
-    actors: ['Orquestrador tecnico', 'Motor legado', 'Banco de dados'],
-    external_systems: [],
-    transfer_channels: [],
-    terminal_patterns: [],
-    handoff_patterns: [],
-    expected_phases: [
-      { kind: 'intake', label: 'Recepcao operacional', objective: 'Receber o insumo inicial da funcionalidade.' },
-      { kind: 'validation', label: 'Validacao e elegibilidade', objective: 'Validar os dados e aplicar regras de elegibilidade.' },
-      { kind: 'handoff', label: 'Handoff e integracao', objective: 'Transferir o processamento entre plataformas ou componentes.' },
-      { kind: 'persistence', label: 'Persistencia funcional', objective: 'Persistir o resultado funcional e o estado do fluxo.' },
-      { kind: 'output', label: 'Entrega e retorno', objective: 'Emitir o artefato final e disponibilizar o retorno.' },
-    ],
-  },
-  'cessao-c3': {
-    id: 'cessao-c3',
-    label: 'Cessao / CIP-C3 / VB6',
-    business_terms: CESSAO_TERMS,
-    actors: [
-      'Operador desktop',
-      'Mainframe batch',
-      'ISD',
-      'VB6',
-      'SQL Server',
-      'CIP/C3',
-      'Assinador',
-    ],
-    external_systems: ['ISD', 'CIP', 'C3', 'ACCC013', 'ACCC014', 'ACCC031', 'ACCC032', 'SBAT8000', 'SBAT8500'],
-    transfer_channels: ['CNAB600', 'CNAB400', 'ISD', 'ARQUIVO', 'REMESSA', 'RETORNO'],
-    terminal_patterns: [
-      /\b(PR_|SP_|FC_).*(TERMO|CSSAO|CESSAO|ASSIN|REMESSA|RETORNO)\b/i,
-      /\b(TMOD|TTERMO|TERMO|CSSAO|CESSAO).*(ASSIN|FINAL|RETORNO)\b/i,
-      /\b(TERMO|CESSAO).*(ASSIN|RETORNO|PROTOCOLO|FINAL)\b/i,
-      /\b(CIP|C3|ISD)\b/i,
-    ],
-    handoff_patterns: [
-      /\b(ISD|CIP|C3|VB6|DESKTOP|CNAB600|CNAB400|REMESSA|RETORNO)\b/i,
-    ],
-    expected_phases: [
-      { kind: 'intake', label: 'Recepcao da cessao', objective: 'Receber arquivo, mensagem ou lote inicial da cessao.' },
-      { kind: 'validation', label: 'Elegibilidade e validacao da cessao', objective: 'Validar os titulos e aplicar regras de elegibilidade da cessao.' },
-      { kind: 'handoff', label: 'Transferencia para desktop e integracoes', objective: 'Transferir o fluxo do mainframe para desktop, servicos e integracoes externas.' },
-      { kind: 'persistence', label: 'Formalizacao e persistencia do termo', objective: 'Formalizar o termo, persistir estados e registrar a assinatura.' },
-      { kind: 'output', label: 'Retorno e consolidacao da cessao', objective: 'Emitir o retorno, consolidar o resultado e fechar a jornada do termo.' },
-    ],
-  },
+// Apenas o pack GENERIC é embutido no código. Packs de domínio específicos
+// (com vocabulário de negócio de um projeto) NÃO ficam no fonte — são providos
+// pelo usuário em `.uai/domain-packs/*.yaml`. Isso mantém o UAI genérico e
+// impede que termos de qualquer projeto vazem para o código da ferramenta.
+const GENERIC_PACK = {
+  id: 'generic',
+  label: 'Generic',
+  business_terms: [],
+  actors: ['Orquestrador tecnico', 'Motor legado', 'Banco de dados'],
+  external_systems: [],
+  transfer_channels: [],
+  terminal_patterns: [],
+  handoff_patterns: [],
+  expected_phases: [
+    { kind: 'intake', label: 'Recepcao operacional', objective: 'Receber o insumo inicial da funcionalidade.' },
+    { kind: 'validation', label: 'Validacao e elegibilidade', objective: 'Validar os dados e aplicar regras de elegibilidade.' },
+    { kind: 'handoff', label: 'Handoff e integracao', objective: 'Transferir o processamento entre plataformas ou componentes.' },
+    { kind: 'persistence', label: 'Persistencia funcional', objective: 'Persistir o resultado funcional e o estado do fluxo.' },
+    { kind: 'output', label: 'Entrega e retorno', objective: 'Emitir o artefato final e disponibilizar o retorno.' },
+  ],
 };
+
+const PACKS = { generic: GENERIC_PACK };
+
+const DEFAULT_PACKS_DIR = path.join('.uai', 'domain-packs');
+
+/**
+ * Carrega packs de domínio externos de `.uai/domain-packs/*.yaml`.
+ * Cada YAML descreve um pack: id, label, business_terms, actors,
+ * external_systems, transfer_channels, terminal_patterns (strings de regex),
+ * handoff_patterns (strings de regex), expected_phases.
+ * Resultado é cacheado por diretório.
+ */
+const _packCache = new Map();
+function loadExternalPacks(packsDir = DEFAULT_PACKS_DIR) {
+  if (_packCache.has(packsDir)) return _packCache.get(packsDir);
+  const packs = {};
+  try {
+    const files = fs.readdirSync(packsDir).filter(name => /\.ya?ml$/i.test(name));
+    for (const file of files) {
+      try {
+        const raw = yaml.load(fs.readFileSync(path.join(packsDir, file), 'utf-8')) || {};
+        const pack = normalizeExternalPack(raw);
+        if (pack && pack.id) packs[pack.id] = pack;
+      } catch (_) { /* ignora pack inválido */ }
+    }
+  } catch (_) { /* diretório ausente: sem packs externos */ }
+  _packCache.set(packsDir, packs);
+  return packs;
+}
+
+function normalizeExternalPack(raw) {
+  if (!raw || !raw.id) return null;
+  return {
+    id: String(raw.id).toLowerCase(),
+    label: raw.label || raw.id,
+    business_terms: toStringArray(raw.business_terms),
+    actors: toStringArray(raw.actors),
+    external_systems: toStringArray(raw.external_systems),
+    transfer_channels: toStringArray(raw.transfer_channels),
+    terminal_patterns: toRegexArray(raw.terminal_patterns),
+    handoff_patterns: toRegexArray(raw.handoff_patterns),
+    expected_phases: Array.isArray(raw.expected_phases)
+      ? raw.expected_phases.map(item => ({ kind: item.kind, label: item.label, objective: item.objective }))
+      : GENERIC_PACK.expected_phases.map(item => ({ ...item })),
+  };
+}
+
+function toStringArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(item => String(item || '').trim()).filter(Boolean);
+}
+
+function toRegexArray(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  for (const item of value) {
+    try { out.push(new RegExp(String(item), 'i')); } catch (_) { /* regex inválida */ }
+  }
+  return out;
+}
+
+function allPacks(packsDir) {
+  return { ...loadExternalPacks(packsDir), ...PACKS };
+}
 
 const MODERNIZATION_PACKS = {
   'azure-java-aks': {
@@ -128,20 +142,37 @@ const MODERNIZATION_PACKS = {
 };
 
 function resolveDomainPack(input = {}) {
+  const packs = allPacks(input.packsDir);
   const requested = String(input.requested || input.domainPack || 'auto').toLowerCase();
   if (requested && requested !== 'auto') {
-    return clonePack(PACKS[requested] || PACKS.generic);
+    return clonePack(packs[requested] || PACKS.generic);
   }
-  return looksLikeCessaoContext(input) ? clonePack(PACKS['cessao-c3']) : clonePack(PACKS.generic);
+  const best = selectBestPack(input, packs);
+  return clonePack(best || PACKS.generic);
 }
 
-function looksLikeCessaoContext(input = {}) {
-  const values = [
+function contextValues(input = {}) {
+  return [
     input.seed,
     ...(input.entities || []).flatMap(entity => [entity.id, entity.name, entity.label, entity.description, ...(entity.semantic_tags || [])]),
     ...(input.relations || []).flatMap(rel => [rel.from, rel.to, rel.from_label, rel.to_label, rel.rel]),
   ].filter(Boolean);
-  return scorePackTerms(PACKS['cessao-c3'], values) >= 3;
+}
+
+/** Auto-seleção: escolhe o pack externo com maior score de termos (>=3). */
+function selectBestPack(input, packs) {
+  const values = contextValues(input);
+  let best = null;
+  let bestScore = 0;
+  for (const pack of Object.values(packs)) {
+    if (pack.id === 'generic') continue;
+    const score = scorePackTerms(pack, values);
+    if (score > bestScore) {
+      bestScore = score;
+      best = pack;
+    }
+  }
+  return bestScore >= 3 ? best : PACKS.generic;
 }
 
 function scorePackTerms(pack, values) {
@@ -231,10 +262,16 @@ function normalize(value) {
     .toUpperCase();
 }
 
+function listPackIds(packsDir) {
+  return Object.keys(allPacks(packsDir));
+}
+
 module.exports = {
   resolveDomainPack,
   resolveModernizationPack,
   scoreBusinessFit,
   rankTerminalLabel,
   rankHandoffLabel,
+  loadExternalPacks,
+  listPackIds,
 };

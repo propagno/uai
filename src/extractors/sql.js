@@ -2,6 +2,7 @@
 
 const fs   = require('fs');
 const path = require('path');
+const sqlAst = require('./sql-ast');
 
 /**
  * SQL extractor for standalone .sql files (DB2 DDL/DML).
@@ -110,6 +111,17 @@ function extractFromText(text, sourceFile, fileHash, options = {}) {
     appendProcedureCalls(actor, upper, sourceFile, fileHash, relations);
     appendColumnEntities(actor, normalized, sourceFile, fileHash, entities, seen);
   }
+
+  // Relacionamentos estruturais (FK, JOIN, colunas tipadas, views) via parser AST.
+  const ast = sqlAst.extractRelationships(normalized, sourceFile, fileHash);
+  for (const astEntity of ast.entities) {
+    const key = `${astEntity.type}:${astEntity.parent ? astEntity.parent + '::' : ''}${astEntity.name}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      entities.push(astEntity);
+    }
+  }
+  relations.push(...ast.relations);
 
   return { entities, relations };
 }

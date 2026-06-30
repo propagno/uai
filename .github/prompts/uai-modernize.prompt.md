@@ -3,10 +3,10 @@
 # uai-modernize
 Use the repo-local UAI engine to fulfill `uai-modernize`.
 ## Invocation
-- Usage: `/uai-modernize <seed> [--target azure-java-aks] [--strategy strangler] [--profile auto|batch|online|hybrid] [--domain-pack auto|generic|cessao-c3] [--facts-only] [--refresh] [--out .uai/modernization]`
-- Example: `/uai-modernize TERMO-DE-CESSAO`
-- Example: `/uai-modernize CNAB600 --target azure-java-aks --strategy strangler --profile batch`
-- Example: `/uai-modernize TERMO-DE-CESSAO --domain-pack cessao-c3 --facts-only`
+- Usage: `/uai-modernize <seed> [--target azure-java-aks] [--strategy strangler] [--profile auto|batch|online|hybrid] [--domain-pack auto|generic|<id>] [--facts-only] [--refresh] [--out .uai/modernization]`
+- Example: `/uai-modernize PROCESSO-EXEMPLO`
+- Example: `/uai-modernize JOB-BATCH-01 --target azure-java-aks --strategy strangler --profile batch`
+- Example: `/uai-modernize PROCESSO-EXEMPLO --domain-pack generic --facts-only`
 
 ## Inputs
 - seed (required): Funcionalidade, job, programa, tabela, campo, tela, stored procedure ou dataset a ser transformado em blueprint de modernizacao.

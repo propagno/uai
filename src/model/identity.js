@@ -75,16 +75,26 @@ function candidateTypesForRelation(rel, side) {
         if (extractor === 'sql') {
           return ['procedure', 'sql_script'];
         }
+        if (extractor === 'vb6') {
+          return ['subroutine', 'screen', 'class', 'module'];
+        }
         return ['program', 'paragraph', 'procedure'];
       case 'INCLUDES':
         return ['program'];
       case 'USES':
       case 'USES_DLL':
-        return ['screen', 'class', 'module'];
+        return ['subroutine', 'screen', 'class', 'module'];
+      case 'NAVIGATES_TO':
+        return ['subroutine', 'control', 'screen'];
+      case 'INVOKES':
+        return ['control', 'screen'];
+      case 'RELATES_TO':
+        return ['table'];
       case 'VALIDATES':
       case 'ROUTES_TO':
       case 'TRANSITIONS_TO':
       case 'CHECKPOINTS':
+      case 'SETS_STATE':
         return ['program', 'paragraph', 'screen', 'class', 'module', 'subroutine'];
       case 'IMPLEMENTS':
         return ['class'];
@@ -128,9 +138,12 @@ function candidateTypesForRelation(rel, side) {
     case 'USES':
     case 'USES_DLL':
       return ['component'];
+    case 'RELATES_TO':
+      return ['table'];
     case 'VALIDATES':
     case 'ROUTES_TO':
     case 'TRANSITIONS_TO':
+    case 'SETS_STATE':
       return ['field', 'column', 'control', 'dataset', 'table', 'procedure'];
     case 'CHECKPOINTS':
       return ['dataset', 'table', 'procedure'];

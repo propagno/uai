@@ -15,6 +15,50 @@ function ff(code, indicator = ' ') {
   return `      ${indicator}${code}`;
 }
 
+test('cobol captura EXEC SQL INCLUDE e reconstrói host-struct pelo uso (cursor + FETCH INTO)', () => {
+  const src = [
+    ff('IDENTIFICATION DIVISION.'),
+    ff('PROGRAM-ID. PGMTST.'),
+    ff('DATA DIVISION.'),
+    ff('WORKING-STORAGE SECTION.'),
+    ff('EXEC SQL INCLUDE HOSTREC END-EXEC.'),
+    ff('EXEC SQL'),
+    ff('  DECLARE C1 CURSOR FOR'),
+    ff('  SELECT COL_A, COL_B, COL_C'),
+    ff('  FROM   SCHEMA.TB_DEMO'),
+    ff('END-EXEC.'),
+    ff('PROCEDURE DIVISION.'),
+    ff('0000-MAIN SECTION.', ' '),
+    ff('EXEC SQL'),
+    ff('  FETCH C1 INTO :HOSTREC.FLD-A, :HOSTREC.FLD-B, :HOSTREC.FLD-C'),
+    ff('END-EXEC.'),
+  ].join('\n');
+
+  const { entities, relations } = cobolExtractFromText(src);
+
+  // INCLUDE → INCLUDES (via sql-include)
+  assert.ok(relations.some(r => r.rel === 'INCLUDES' && r.to === 'HOSTREC' && r.via === 'sql-include'),
+    'EXEC SQL INCLUDE vira INCLUDES via sql-include');
+
+  // host-struct reconstruído
+  const cpy = entities.find(e => e.type === 'copybook' && e.name === 'HOSTREC');
+  assert.ok(cpy && cpy.resolution === 'reconstructed_from_usage', 'copybook reconstruído marcado');
+  assert.equal(cpy.source_table, 'SCHEMA.TB_DEMO');
+
+  const flds = entities.filter(e => e.type === 'field' && e.parent === 'HOSTREC');
+  assert.equal(flds.length, 3, '3 campos reconstruídos');
+  const map = Object.fromEntries(flds.map(f => [f.name, f.source_column]));
+  assert.equal(map['FLD-A'], 'COL_A');
+  assert.equal(map['FLD-C'], 'COL_C');
+  assert.ok(flds.every(f => f.confidence_basis === 'reconstructed_from_usage'));
+});
+
+function cobolExtractFromText(src) {
+  const tmp = path.join(os.tmpdir(), `uai-cbl-${Date.now()}.cbl`);
+  fs.writeFileSync(tmp, src);
+  try { return cobol.extract(tmp, 'h'); } finally { fs.rmSync(tmp, { force: true }); }
+}
+
 test('sql extractor emits procedures, tables, columns and procedural relations', () => {
   const sqlText = [
     'CREATE PROCEDURE PROC_MAIN',
@@ -98,10 +142,10 @@ test('cobol extractor distinguishes static and dynamic calls and extracts embedd
 
 test('cobol extractor emits IO and validation heuristics for semantic phases', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uai-cobol-sem-'));
-  const filePath = path.join(tmpDir, 'TERMO.cbl');
+  const filePath = path.join(tmpDir, 'PEDIDO.cbl');
   const content = [
     ff('IDENTIFICATION DIVISION.'),
-    ff('PROGRAM-ID. TERMO.'),
+    ff('PROGRAM-ID. PEDIDO.'),
     ff('PROCEDURE DIVISION.'),
     ff('READ ARQ-ENTRADA.'),
     ff("IF WS-STATUS = 'ER'"),
@@ -153,25 +197,25 @@ test('cobol extractor parses embedded CICS blocks and MQ PUT/GET calls', () => {
 
 test('jcl extractor preserves immediate comment blocks for job and step descriptions', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uai-jcl-'));
-  const filePath = path.join(tmpDir, 'FRECA224.jcl');
+  const filePath = path.join(tmpDir, 'PGMA224.jcl');
   const content = [
-    '//* *** GERA RELATORIO TERMO DE CESSAO',
-    '//FRECA224 JOB (ACCT),CLASS=A',
-    '//* EMITE TERMO DE CESSAO PARA ENVIO',
-    '//STEP010 EXEC PGM=FREC5245',
-    '//ARQSAI  DD  DSN=MX.TERMO.SAIDA,DISP=NEW',
+    '//* *** GERA RELATORIO PEDIDO DE VENDA',
+    '//PGMA224 JOB (ACCT),CLASS=A',
+    '//* EMITE PEDIDO DE VENDA PARA ENVIO',
+    '//STEP010 EXEC PGM=PGM5245',
+    '//ARQOUT  DD  DSN=MX.PEDIDO.SAIDA,DISP=NEW',
   ].join('\n');
 
   fs.writeFileSync(filePath, content, 'latin1');
 
   const { entities } = jcl.extract(filePath, 'hash-jcl');
-  const job = entities.find(entity => entity.type === 'job' && entity.name === 'FRECA224');
+  const job = entities.find(entity => entity.type === 'job' && entity.name === 'PGMA224');
   const step = entities.find(entity => entity.type === 'step' && entity.name === 'STEP010');
 
-  assert.equal(job.description, 'GERA RELATORIO TERMO DE CESSAO');
+  assert.equal(job.description, 'GERA RELATORIO PEDIDO DE VENDA');
   assert.equal(job.description_source, 'jcl_comment');
   assert.ok(job.description_evidence.some(item => item.endsWith(':1')));
-  assert.equal(step.description, 'EMITE TERMO DE CESSAO PARA ENVIO');
+  assert.equal(step.description, 'EMITE PEDIDO DE VENDA PARA ENVIO');
   assert.equal(step.description_source, 'jcl_comment');
   assert.ok(step.description_evidence.some(item => item.endsWith(':3')));
 });
@@ -262,16 +306,16 @@ test('dynamic call resolver upgrades CALL-DYNAMIC into CALLS when flow evidence 
 
 test('vb6 extractor emits DLL, stored procedure and file IO heuristics', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uai-vb6-sem-'));
-  const filePath = path.join(tmpDir, 'FrmTermo.frm');
+  const filePath = path.join(tmpDir, 'FrmPedido.frm');
   const content = [
     'VERSION 5.00',
     'Object = "{00000000-0000-0000-0000-000000000000}"; "termctl.ocx"',
-    'Begin VB.Form FrmTermo',
+    'Begin VB.Form FrmPedido',
     'End',
     'Private Declare Function Assina Lib "assinador.dll" () As Long',
     'Private Sub CmdAssinar_Click()',
-    '  cn.CommandText = "PR_TERMO_CESSAO_ASSINA"',
-    '  Open "termo_assinado.txt" For Output As #1',
+    '  cn.CommandText = "PR_PROC"',
+    '  Open "proc_exemplo.txt" For Output As #1',
     'End Sub',
   ].join('\n');
 
@@ -279,11 +323,11 @@ test('vb6 extractor emits DLL, stored procedure and file IO heuristics', () => {
   const { entities, relations } = require('../src/extractors/vb6').extract(filePath, 'hash-vb6-sem');
 
   assert.ok(entities.some(entity => entity.type === 'component' && entity.name === 'ASSINADOR.DLL'));
-  assert.ok(entities.some(entity => entity.type === 'procedure' && entity.name === 'PR_TERMO_CESSAO_ASSINA'));
-  assert.ok(entities.some(entity => entity.type === 'dataset' && entity.name === 'TERMO_ASSINADO.TXT'));
+  assert.ok(entities.some(entity => entity.type === 'procedure' && entity.name === 'PR_PROC'));
+  assert.ok(entities.some(entity => entity.type === 'dataset' && entity.name === 'PROC_EXEMPLO.TXT'));
   assert.ok(relations.some(rel => rel.rel === 'USES_DLL' && rel.to === 'ASSINADOR.DLL'));
-  assert.ok(relations.some(rel => rel.rel === 'CALLS_SP' && rel.to === 'PR_TERMO_CESSAO_ASSINA'));
-  assert.ok(relations.some(rel => rel.rel === 'WRITES' && rel.to === 'TERMO_ASSINADO.TXT'));
+  assert.ok(relations.some(rel => rel.rel === 'CALLS_SP' && rel.to === 'PR_PROC'));
+  assert.ok(relations.some(rel => rel.rel === 'WRITES' && rel.to === 'PROC_EXEMPLO.TXT'));
 });
 
 test('dataset-linker resolves internal COBOL files to physical datasets via JCL DD parameters', () => {

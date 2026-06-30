@@ -7,6 +7,8 @@ const graph = require('./graph');
 const entityIdx = require('./entity-index');
 const analysisResolution = require('./analysis-resolution');
 const domainPack = require('./domain-pack');
+const { combineConfidence, CONFIDENCE, DEFAULT_TARGET: CONFIDENCE_TARGET_DEFAULT } = require('./confidence');
+const { cleanObjective } = require('../utils/cobol-objective');
 
 const STATUS_NAME_RE = /\b(STATUS|SITUAC|SITUATION|STATE|ESTADO|FASE|ETAPA)\b/i;
 const ERROR_RE = /\b(ABEND|ERROR|ERRO|FAIL|FALHA|INVALID|NOT\s+FOUND|NAO\s+ENCONTR|REJECT|REJEIT|RC=|RETURN\s+CODE|REJ|REJEICAO)\b/i;
@@ -50,13 +52,24 @@ function build(model, seed, options = {}) {
 
   const view = executiveView.buildFocusedView(context, resolution.view_query || seed, { depth, full: Boolean(options.full) });
   const fallbackMatches = entityIdx.findEntities(index, seed).slice(0, 6);
-  const subjectIds = new Set([
+  const broadSubjectIds = new Set([
     ...resolution.subject_ids,
     ...collectSubjectIds(view, fallbackMatches),
   ]);
-  const relatedRelations = collectRelatedRelations(subjectIds, relations, depth + 1);
+  const primaryFlow = resolvePrimaryFlow(resolution, view, functionalFlows, broadSubjectIds);
+
+  // Escopo de recorte: para fluxos BATCH (job), limitar ao job + steps + programas +
+  // datasets diretos (subject_ids já é o fecho limitado do job), com relações diretas —
+  // evita o "dump" de centenas de programas que a travessia ampla causava.
+  // Para os demais tipos, mantém a coleta ampla por travessia.
+  const isBatchScope = primaryFlow && primaryFlow.type === 'batch';
+  const subjectIds = isBatchScope
+    ? scopeBatchFlow(primaryFlow, relations)
+    : broadSubjectIds;
+  const relatedRelations = isBatchScope
+    ? collectScopedRelations(subjectIds, relations)
+    : collectRelatedRelations(subjectIds, relations, depth + 1);
   const relatedEntities = collectRelatedEntities(subjectIds, relatedRelations, entityById, view, resolution);
-  const primaryFlow = resolvePrimaryFlow(resolution, view, functionalFlows, subjectIds);
   const citations = buildCitations(relatedEntities, relatedRelations);
   const lineage = buildLineageSummary(primaryFlow, relatedRelations, relatedEntities);
   const phases = buildSemanticPhases({
@@ -119,6 +132,8 @@ function build(model, seed, options = {}) {
     applyFactsOnlyToPhases(phases, claims);
   }
   const traceability = buildTraceabilityMatrix(phases, claims);
+  const confidenceTarget = resolveConfidenceTarget(options.confidenceTarget);
+  const confidenceCoverage = buildSliceConfidenceCoverage(relatedEntities, relatedRelations, phases, confidenceTarget);
   const score = buildCompletenessScore({
     resolution,
     phases,
@@ -131,6 +146,7 @@ function build(model, seed, options = {}) {
     citations,
     reverseTrace,
     claims,
+    confidenceCoverage,
   });
   const qualityGate = buildQualityGate({
     resolution,
@@ -140,6 +156,7 @@ function build(model, seed, options = {}) {
     reverseTrace,
     score,
     claims,
+    confidenceCoverage,
   });
   const gaps = buildGapList({
     score,
@@ -176,6 +193,8 @@ function build(model, seed, options = {}) {
     }),
     score,
     quality_gate: qualityGate,
+    confidence_coverage: confidenceCoverage,
+    verification_queue: confidenceCoverage.below_target,
     gaps,
     lineage,
     phases,
@@ -238,17 +257,95 @@ function collectSubjectIds(view, fallbackMatches) {
   return [...ids];
 }
 
-function collectRelatedRelations(subjectIds, relations, depth) {
+// Teto do recorte: mantém o dossiê focado e acota o custo de todas as etapas a
+// jusante em sistemas grandes (um seed de alto fan-in poderia puxar dezenas de
+// milhares de relações). Relações DIRETAS (que tocam o subject) têm prioridade
+// sobre as traversadas.
+const MAX_RELATED_RELATIONS = 4000;
+
+function collectRelatedRelations(subjectIds, relations, depth, limit = MAX_RELATED_RELATIONS) {
   if (!subjectIds || subjectIds.size === 0) return [];
   const idx = graph.buildIndex(relations || []);
   const direct = (relations || []).filter(rel => subjectIds.has(rel.from_id || rel.from) || subjectIds.has(rel.to_id || rel.to));
-  const traversed = graph.traverse([...subjectIds], idx, 'both', depth);
   const byKey = new Map();
-  for (const rel of [...direct, ...traversed]) {
+  const addRel = (rel) => {
     const key = `${rel.from_id || rel.from}:${rel.rel}:${rel.to_id || rel.to}:${(rel.evidence || []).join('|')}`;
     if (!byKey.has(key)) byKey.set(key, rel);
+  };
+  for (const rel of direct) {
+    if (byKey.size >= limit) break;
+    addRel(rel);
+  }
+  if (byKey.size < limit) {
+    // maxResults acota a BFS na origem (evita materializar subgrafos enormes).
+    const traversed = graph.traverse([...subjectIds], idx, 'both', depth, limit * 2);
+    for (const rel of traversed) {
+      if (byKey.size >= limit) break;
+      addRel(rel);
+    }
   }
   return [...byKey.values()];
+}
+
+// Escopo DIRETO de um job batch: job + steps + programas executados diretamente
+// + dados/copybooks que esses programas tocam em UM salto. NÃO segue o fecho de
+// CALLS (que arrastaria menus/hubs com dezenas de programas). É o recorte que
+// espelha a documentação manual (job → steps → programas → datasets).
+function scopeBatchFlow(primaryFlow, relations) {
+  const ids = new Set();
+  const jobName = String(primaryFlow.entry_name || primaryFlow.entry_label || '').toUpperCase();
+  const jobId = primaryFlow.entry_id || `job:${jobName}`;
+  ids.add(jobId);
+
+  // steps do job
+  const stepIds = new Set();
+  for (const rel of relations) {
+    if (rel.rel === 'CONTAINS' && (rel.from_id === jobId || (rel.from || '').toUpperCase() === jobName) && rel.to_type === 'step') {
+      stepIds.add(rel.to_id); ids.add(rel.to_id);
+    }
+  }
+  // programas executados diretamente pelos steps (nível 0)
+  const progIds = new Set();
+  for (const rel of relations) {
+    if (rel.rel === 'EXECUTES' && stepIds.has(rel.from_id)) {
+      progIds.add(rel.to_id); ids.add(rel.to_id);
+    }
+  }
+  // + UM nível de CALLS (a lógica do job vive nos programas chamados diretamente;
+  //   NÃO seguir além disso evita arrastar menus/hubs com dezenas de programas)
+  const logicPrograms = new Set(progIds);
+  for (const rel of relations) {
+    if (rel.rel === 'CALLS' && progIds.has(rel.from_id) && rel.to_type === 'program') {
+      logicPrograms.add(rel.to_id); ids.add(rel.to_id);
+    }
+  }
+  // dados/copybooks/procedures tocados pelos steps OU por esses programas
+  const owners = new Set([...stepIds, ...logicPrograms]);
+  for (const rel of relations) {
+    if (!owners.has(rel.from_id)) continue;
+    if (['READS', 'WRITES', 'UPDATES', 'INCLUDES', 'CALLS_SP', 'SETS_STATE', 'EMITS', 'SENDS'].includes(rel.rel)) {
+      ids.add(rel.to_id);
+    }
+  }
+  return ids;
+}
+
+// Recorte ESCOPADO (batch): só relações cujos DOIS endpoints estão no conjunto
+// do job (ou cuja origem está no conjunto e o destino é dado/copybook/programa
+// direto). Sem travessia — mantém o dossiê focado no job e seus steps.
+function collectScopedRelations(subjectIds, relations) {
+  const out = [];
+  for (const rel of relations || []) {
+    const from = rel.from_id || rel.from;
+    const to = rel.to_id || rel.to;
+    if (subjectIds.has(from) && subjectIds.has(to)) {
+      out.push(rel);
+    } else if (subjectIds.has(from) && ['READS', 'WRITES', 'UPDATES', 'INCLUDES', 'CALLS_SP', 'SETS_STATE', 'EMITS', 'SENDS', 'RELATES_TO'].includes(rel.rel)) {
+      // arestas de dados/integração que saem de um membro do job são relevantes
+      out.push(rel);
+    }
+  }
+  return out;
 }
 
 function collectRelatedEntities(subjectIds, relations, entityById, view, resolution) {
@@ -286,6 +383,8 @@ function buildLineageSummary(primaryFlow, relations, entities) {
   const outputs = new Set();
   const contracts = new Set();
   const terminals = [];
+  // Índice por id (O(1) lookup) — evita entities.find por relação (O(n²)).
+  const byId = new Map((entities || []).map(entity => [entity.id, entity]));
 
   if (primaryFlow) {
     if (primaryFlow.entry_label) chain.add(primaryFlow.entry_label);
@@ -295,8 +394,8 @@ function buildLineageSummary(primaryFlow, relations, entities) {
   }
 
   for (const rel of relations || []) {
-    const fromEntity = entities.find(entity => entity.id === (rel.from_id || rel.from));
-    const toEntity = entities.find(entity => entity.id === (rel.to_id || rel.to));
+    const fromEntity = byId.get(rel.from_id || rel.from);
+    const toEntity = byId.get(rel.to_id || rel.to);
     const fromLabel = labelForEntity(fromEntity, rel.from_label || rel.from);
     const toLabel = labelForEntity(toEntity, rel.to_label || rel.to);
     const targetType = (toEntity && toEntity.type) || rel.to_type;
@@ -333,6 +432,16 @@ function buildLineageSummary(primaryFlow, relations, entities) {
 }
 
 function buildSemanticPhases(input) {
+  const pf = input.primaryFlow;
+  // Fluxo batch: os steps do JCL SÃO as fases (objetivo real do comentário). Tem
+  // prioridade sobre a jornada genérica, mesmo cross-platform. Reconstrói os steps
+  // do modelo quando o fluxo resolvido os perdeu.
+  if (pf && (pf.type === 'batch' || pf.entry_type === 'job')) {
+    const batchPhases = buildBatchSemanticPhases(pf, input.relatedRelations, input.relatedEntities, input.domainPack);
+    if (batchPhases.length > 0) {
+      return batchPhases;
+    }
+  }
   if (shouldUseJourneyPhases(input)) {
     const phases = buildJourneySemanticPhases(input);
     if (phases.length > 0) {
@@ -382,16 +491,17 @@ function buildJourneySemanticPhases(input) {
     });
   }
 
+  const entityByIdLocal = new Map((input.relatedEntities || []).map(entity => [entity.id, entity]));
   for (const rel of input.relatedRelations || []) {
-    const role = classifyRelationToPhaseKind(rel, input.relatedEntities, input.domainPack);
+    const role = classifyRelationToPhaseKind(rel, input.relatedEntities, input.domainPack, entityByIdLocal);
     if (!role || !phaseDefs.has(role)) {
       continue;
     }
     const phase = phaseDefs.get(role);
     const fromLabel = rel.from_label || rel.from;
     const toLabel = rel.to_label || rel.to;
-    const fromEntity = (input.relatedEntities || []).find(entity => entity.id === (rel.from_id || rel.from));
-    const toEntity = (input.relatedEntities || []).find(entity => entity.id === (rel.to_id || rel.to));
+    const fromEntity = entityByIdLocal.get(rel.from_id || rel.from);
+    const toEntity = entityByIdLocal.get(rel.to_id || rel.to);
 
     if (['CALLS', 'CALLS_PROC', 'CALLS_SP', 'EXECUTES', 'TRIGGERS', 'USES_DLL', 'HANDLES', 'HANDLES_EVENTS'].includes(rel.rel)) {
       phase.programs = uniqueStrings([...phase.programs, fromLabel, toLabel]);
@@ -445,10 +555,70 @@ function buildJourneySemanticPhases(input) {
     }));
 }
 
+// Reconstrói os steps de um job batch a partir do modelo (entidades + relações
+// CONTAINS/EXECUTES/READS/WRITES) quando o fluxo resolvido perdeu os steps.
+// Mesma fonte do generateStepTable — garante fases = steps reais do JCL.
+function reconstructBatchSteps(primaryFlow, relations, entities) {
+  const byId = new Map((entities || []).map(e => [e.id, e]));
+  const jobUpper = String(primaryFlow.entry_name || primaryFlow.entry_label || '').toUpperCase();
+  const jobId = primaryFlow.entry_id || `job:${jobUpper}`;
+  const stepRels = (relations || []).filter(r => r.rel === 'CONTAINS'
+    && (r.from_id === jobId || String(r.from || '').toUpperCase() === jobUpper)
+    && (r.to_type === 'step' || (byId.get(r.to_id) || {}).type === 'step'));
+  const steps = stepRels.map(r => {
+    const ent = byId.get(r.to_id) || {};
+    const stepId = r.to_id;
+    const dataObjects = [];
+    for (const dr of relations) {
+      if (dr.from_id !== stepId) continue;
+      if (!['READS', 'WRITES', 'UPDATES'].includes(dr.rel)) continue;
+      const to = byId.get(dr.to_id) || {};
+      dataObjects.push({ id: dr.to_id, name: dr.to, label: dr.to_label || dr.to, type: to.type || dr.to_type, op: dr.rel });
+    }
+    const directPrograms = relations
+      .filter(pr => pr.rel === 'EXECUTES' && pr.from_id === stepId)
+      .map(pr => { const p = byId.get(pr.to_id) || {}; return { id: pr.to_id, name: pr.to, label: pr.to_label || pr.to, description: p.description }; });
+    // Acesso a tabelas pelos programas executados (persistência/saída reais).
+    for (const p of directPrograms) {
+      for (const tr of relations) {
+        if (tr.from_id !== p.id || !['READS', 'WRITES', 'UPDATES'].includes(tr.rel)) continue;
+        const to = byId.get(tr.to_id) || {};
+        if (to.type === 'table') dataObjects.push({ id: tr.to_id, name: tr.to, label: tr.to_label || tr.to, type: 'table', op: tr.rel });
+      }
+    }
+    return {
+      id: stepId,
+      name: ent.name || r.to,
+      label: ent.label || r.to_label || r.to,
+      description: ent.description || '',
+      semantic_tags: ent.semantic_tags || [],
+      seq: ent.seq ?? r.seq ?? 0,
+      conditionText: ent.conditionText || null,
+      direct_programs: directPrograms,
+      downstream_programs: [],
+      procedures: [],
+      data_objects: dataObjects,
+    };
+  });
+  return sortSteps(steps);
+}
+
 function buildBatchSemanticPhases(primaryFlow, relations, entities, resolvedDomainPack) {
+  // Descrição real do step (comentário JCL) pela ENTIDADE — robusto a cópias do
+  // fluxo durante a resolução, que podem perder o campo description.
+  // Descrição real do step (comentário JCL) pela ENTIDADE — robusto a cópias do
+  // fluxo durante a resolução, que podem perder o campo description.
+  const stepDescById = new Map();
+  for (const e of entities || []) {
+    if (e.type === 'step' && e.description) stepDescById.set(e.id, e.description);
+  }
+  const steps = (primaryFlow.steps || []).length
+    ? sortSteps(primaryFlow.steps)
+    : reconstructBatchSteps(primaryFlow, relations, entities);
   const defs = [];
-  for (const step of sortSteps(primaryFlow.steps || [])) {
-    defs.push(classifyStepToPhaseDef(step, primaryFlow, resolvedDomainPack));
+  for (const step of steps) {
+    const enriched = step.description ? step : { ...step, description: stepDescById.get(step.id) || '' };
+    defs.push(classifyStepToPhaseDef(enriched, primaryFlow, resolvedDomainPack));
   }
   const merged = mergePhaseDefs(defs);
   return merged.map((def, idx) => makePhase({
@@ -477,6 +647,29 @@ function buildScreenSemanticPhases(primaryFlow, relations, entities) {
       memberIds: [primaryFlow.entry_id, ...(primaryFlow.routines || []).map(item => item.id), ...(primaryFlow.controls || []).map(item => item.id)],
     },
   ];
+  // Fase de ação: botão → stored procedure / tabela / arquivo (backend real).
+  const procedures = uniqueLabels(primaryFlow.procedures || []);
+  const tables = (primaryFlow.data_objects || []).filter(item => item.type === 'table').map(item => item.label || item.name);
+  const datasets = (primaryFlow.data_objects || []).filter(item => item.type === 'dataset').map(item => item.label || item.name);
+  if (procedures.length > 0 || tables.length > 0 || datasets.length > 0) {
+    defs.push({
+      label: 'Acao do botao e acesso a dados',
+      kind: 'processing',
+      objective: 'Executar a acao acionada pelo controle e acessar os dados.',
+      trigger: 'Evento do controle (clique, validacao).',
+      actor_labels: ['Operador desktop'],
+      programs: [],
+      procedures,
+      inputs: uniqueLabels(primaryFlow.controls || []),
+      persistence: [...tables, ...datasets],
+      outputs: [],
+      gates: [],
+      memberIds: [
+        ...(primaryFlow.procedures || []).map(item => item.id),
+        ...(primaryFlow.data_objects || []).map(item => item.id),
+      ],
+    });
+  }
   if ((primaryFlow.components || []).length > 0 || (primaryFlow.classes || []).length > 0) {
     defs.push({
       label: 'Integracao desktop e servicos',
@@ -491,6 +684,24 @@ function buildScreenSemanticPhases(primaryFlow, relations, entities) {
       outputs: uniqueLabels(primaryFlow.components || []),
       gates: [],
       memberIds: [...(primaryFlow.components || []).map(item => item.id), ...(primaryFlow.classes || []).map(item => item.id)],
+    });
+  }
+  // Fase de navegação: tela → outra(s) tela(s).
+  if ((primaryFlow.navigations || []).length > 0) {
+    const targets = uniqueStrings((primaryFlow.navigations || []).map(nav => nav.to));
+    defs.push({
+      label: 'Navegacao entre telas',
+      kind: 'handoff',
+      objective: `Abrir/fechar telas subsequentes: ${targets.join(', ')}.`,
+      trigger: 'Acao do operador que dispara navegacao.',
+      actor_labels: ['Operador desktop'],
+      programs: [],
+      procedures: [],
+      inputs: [],
+      persistence: [],
+      outputs: targets,
+      gates: [],
+      memberIds: [primaryFlow.entry_id, ...(primaryFlow.navigations || []).map(nav => nav.to_id).filter(Boolean)],
     });
   }
   return defs.map((def, idx) => makePhase({
@@ -689,15 +900,10 @@ function defaultTriggerForPhase(kind) {
 }
 
 function defaultActorsForPhase(kind, resolvedDomainPack) {
-  if (resolvedDomainPack && resolvedDomainPack.id === 'cessao-c3') {
-    switch (kind) {
-      case 'intake': return ['Mainframe batch'];
-      case 'validation': return ['Mainframe batch', 'Motor de regras'];
-      case 'handoff': return ['Mainframe batch', 'ISD', 'VB6', 'Operador desktop'];
-      case 'persistence': return ['VB6', 'SQL Server', 'Assinador'];
-      case 'output': return ['SQL Server', 'CIP/C3'];
-      default: return resolvedDomainPack.actors || [];
-    }
+  // Atores específicos vêm do domain pack externo (se fornecido), nunca
+  // hardcoded no fonte. Sem pack, usa rótulos genéricos.
+  if (resolvedDomainPack && resolvedDomainPack.id !== 'generic' && (resolvedDomainPack.actors || []).length > 0) {
+    return resolvedDomainPack.actors;
   }
   switch (kind) {
     case 'intake': return ['Orquestrador tecnico'];
@@ -709,12 +915,28 @@ function defaultActorsForPhase(kind, resolvedDomainPack) {
   }
 }
 
-function classifyRelationToPhaseKind(rel, entities, resolvedDomainPack) {
-  const fromEntity = (entities || []).find(entity => entity.id === (rel.from_id || rel.from));
-  const toEntity = (entities || []).find(entity => entity.id === (rel.to_id || rel.to));
+/**
+ * Rótulo/objetivo de fase: quando um domain pack externo define expected_phases
+ * para o kind, usa o do pack; senão usa o genérico. Mantém o fonte livre de
+ * vocabulário de qualquer projeto.
+ */
+function phaseLabelFor(kind, resolvedDomainPack, genericLabel, genericObjective) {
+  const phase = (resolvedDomainPack && resolvedDomainPack.id !== 'generic')
+    ? (resolvedDomainPack.expected_phases || []).find(item => item.kind === kind)
+    : null;
+  return {
+    label: (phase && phase.label) || genericLabel,
+    objective: (phase && phase.objective) || genericObjective,
+  };
+}
+
+function classifyRelationToPhaseKind(rel, entities, resolvedDomainPack, entityById) {
+  const byId = entityById || new Map((entities || []).map(entity => [entity.id, entity]));
+  const fromEntity = byId.get(rel.from_id || rel.from);
+  const toEntity = byId.get(rel.to_id || rel.to);
   const combined = `${rel.from_label || rel.from} ${rel.rel} ${rel.to_label || rel.to}`.toUpperCase();
-  const fromPlatform = resolvePlatforms([fromEntity && fromEntity.id].filter(Boolean), entities)[0];
-  const toPlatform = resolvePlatforms([toEntity && toEntity.id].filter(Boolean), entities)[0];
+  const fromPlatform = fromEntity ? platformForType(fromEntity.type) : undefined;
+  const toPlatform = toEntity ? platformForType(toEntity.type) : undefined;
   if (fromPlatform && toPlatform && fromPlatform !== toPlatform) {
     return 'handoff';
   }
@@ -746,8 +968,10 @@ function actorLabelsForRelation(rel, fromEntity, toEntity, resolvedDomainPack) {
   const labels = [];
   const combined = `${rel.from_label || rel.from} ${rel.to_label || rel.to}`;
   if (/(OPERADOR|USUARIO|ASSIN)/i.test(combined)) labels.push('Operador desktop');
-  if (/(ISD)/i.test(combined)) labels.push('ISD');
-  if (/(CIP|C3)/i.test(combined)) labels.push('CIP/C3');
+  // Sistemas externos específicos vêm do domain pack (external_systems), não do fonte.
+  for (const system of (resolvedDomainPack && resolvedDomainPack.external_systems) || []) {
+    if (system && combined.toUpperCase().includes(String(system).toUpperCase())) labels.push(system);
+  }
   if (fromEntity && ['screen', 'project', 'class', 'module'].includes(fromEntity.type)) labels.push('VB6');
   if (toEntity && ['screen', 'project', 'class', 'module'].includes(toEntity.type)) labels.push('VB6');
   if (fromEntity && ['table', 'column', 'procedure'].includes(fromEntity.type)) labels.push('Banco de dados');
@@ -792,39 +1016,44 @@ function classifyStepToPhaseDef(step, primaryFlow, resolvedDomainPack) {
   let objective = 'Executar a regra central desta etapa.';
   let actorLabels = ['Motor legado'];
   let trigger = initial ? 'Disparo do job batch.' : 'Conclusao da fase anterior.';
-  const isCessao = resolvedDomainPack && resolvedDomainPack.id === 'cessao-c3';
+  // Sinal de handoff genérico + padrões do domain pack externo (se houver).
+  const isHandoffSignal = /\b(VB6|TELA|FORM|DESKTOP|MAINFRAME|BATCH|MQ|FILA|SERVICE|API|GATEWAY|ASSIN)\b/.test(combinedText)
+    || domainPack.rankHandoffLabel(resolvedDomainPack, combinedText) > 0;
 
   if (initial || /\b(RECEP|ENTRADA|INICIO|LOAD|CARGA|IMPORT)\b/.test(combinedText) || (inputs.length > 0 && persistence.length === 0 && outputs.length === 0)) {
     kind = 'intake';
-    label = isCessao ? 'Recepcao da cessao' : 'Recepcao operacional';
-    objective = isCessao ? 'Receber arquivo, mensagem ou lote inicial da cessao.' : 'Receber arquivos, parametros ou mensagens e preparar o processamento.';
-    actorLabels = isCessao ? ['Mainframe batch'] : ['Orquestrador batch'];
+    ({ label, objective } = phaseLabelFor(kind, resolvedDomainPack, 'Recepcao operacional', 'Receber arquivos, parametros ou mensagens e preparar o processamento.'));
+    actorLabels = defaultActorsForPhase(kind, resolvedDomainPack);
     trigger = initial ? 'Disparo do job batch.' : 'Disponibilidade da entrada.';
   } else if (gates.length > 0 || RULE_RE.test(combinedText) || /\b(VALID|CLASSIF|ROTE|SEPARA|TRIAGE|COND)\b/.test(combinedText)) {
     kind = 'validation';
-    label = isCessao ? 'Elegibilidade e validacao da cessao' : 'Validacao e elegibilidade';
-    objective = isCessao ? 'Validar os titulos e aplicar regras de elegibilidade da cessao.' : 'Validar dados, aplicar condicoes e direcionar o fluxo.';
+    ({ label, objective } = phaseLabelFor(kind, resolvedDomainPack, 'Validacao e elegibilidade', 'Validar dados, aplicar condicoes e direcionar o fluxo.'));
     actorLabels = ['Motor de regras'];
-  } else if (/\b(ISD|CIP|C3|VB6|TELA|FORM|ASSIN|SBAT8|ACCC0|CNAB600)\b/.test(combinedText)) {
+  } else if (isHandoffSignal) {
     kind = 'handoff';
-    label = isCessao ? 'Transferencia para desktop e integracoes' : 'Handoff e integracao';
-    objective = isCessao ? 'Transferir o fluxo do mainframe para desktop, servicos e integracoes externas.' : 'Transferir o fluxo entre plataformas e componentes.';
-    actorLabels = isCessao ? ['Mainframe batch', 'ISD', 'VB6', 'Operador desktop'] : ['Servico externo'];
+    ({ label, objective } = phaseLabelFor(kind, resolvedDomainPack, 'Handoff e integracao', 'Transferir o fluxo entre plataformas e componentes.'));
+    actorLabels = defaultActorsForPhase(kind, resolvedDomainPack);
   } else if (persistence.length > 0 && outputs.length > 0) {
     kind = 'consolidation';
-    label = isCessao ? 'Formalizacao e persistencia do termo' : 'Consolidacao e preparacao de saida';
-    objective = isCessao ? 'Formalizar o termo, persistir estados e registrar a assinatura.' : 'Consolidar o resultado e preparar os artefatos seguintes.';
-    actorLabels = isCessao ? ['VB6', 'SQL Server', 'Assinador'] : ['Motor legado', 'Banco de dados'];
+    ({ label, objective } = phaseLabelFor(kind, resolvedDomainPack, 'Consolidacao e preparacao de saida', 'Consolidar o resultado e preparar os artefatos seguintes.'));
+    actorLabels = ['Motor legado', 'Banco de dados'];
   } else if (persistence.length > 0 || /\b(GRAVA|ATUALIZA|INSERT|UPDATE|PR_|SP_)\b/.test(combinedText)) {
     kind = 'persistence';
-    label = isCessao ? 'Formalizacao e persistencia do termo' : 'Persistencia funcional';
-    objective = isCessao ? 'Formalizar o termo, persistir estados e registrar a assinatura.' : 'Persistir o estado ou resultado parcial.';
-    actorLabels = isCessao ? ['VB6', 'SQL Server', 'Assinador'] : ['Banco de dados'];
+    ({ label, objective } = phaseLabelFor(kind, resolvedDomainPack, 'Persistencia funcional', 'Persistir o estado ou resultado parcial.'));
+    actorLabels = defaultActorsForPhase(kind, resolvedDomainPack);
   } else if (outputs.length > 0 || MESSAGE_RE.test(combinedText) || /\b(ENVIO|EMITE|GERA|RELATOR|REPORT|SAIDA|EXPORT)\b/.test(combinedText)) {
     kind = 'output';
-    label = isCessao ? 'Retorno e consolidacao da cessao' : 'Entrega e retorno';
-    objective = isCessao ? 'Emitir o retorno, consolidar o resultado e fechar a jornada do termo.' : 'Gerar a saida consumida a jusante.';
-    actorLabels = isCessao ? ['SQL Server', 'CIP/C3'] : ['Consumidor a jusante'];
+    ({ label, objective } = phaseLabelFor(kind, resolvedDomainPack, 'Entrega e retorno', 'Gerar a saida consumida a jusante.'));
+    actorLabels = defaultActorsForPhase(kind, resolvedDomainPack);
+  }
+
+  // Fase dirigida pelo STEP: quando o step traz o comentário real do JCL, ele vira
+  // o rótulo/objetivo da fase (cada step = uma fase), mantendo o `kind` da taxonomia
+  // para atores/gatilho. É o que espelha a cadeia real do job (um step por EXEC).
+  const stepObjective = cleanStepObjective(step.description);
+  if (stepObjective) {
+    label = stepObjective.length > 64 ? stepObjective.slice(0, 64).trim() + '…' : stepObjective;
+    objective = stepObjective;
   }
 
   return {
@@ -847,6 +1076,21 @@ function classifyStepToPhaseDef(step, primaryFlow, resolvedDomainPack) {
       ...((step.data_objects || []).map(item => item.id)),
     ].filter(Boolean),
   };
+}
+
+// Limpa o comentário do step do JCL para uso como objetivo de fase. Descarta
+// blocos vazios/decorativos (linhas de asterisco, rótulos triviais como "STEP01").
+function cleanStepObjective(description) {
+  if (!description) return null;
+  const s = String(description)
+    .replace(/\*+/g, ' ')
+    .replace(/^[\s.=-]+/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const letters = s.replace(/[^A-Za-zÀ-ÿ]/g, '');
+  if (letters.length < 6) return null;            // só ruído/pontuação
+  if (/^STEP\s*\d+\.?$/i.test(s)) return null;    // rótulo trivial
+  return s.slice(0, 160);
 }
 
 function mergePhaseDefs(defs) {
@@ -882,7 +1126,16 @@ function mergePhaseDefs(defs) {
 function makePhase(input) {
   const memberIds = [...new Set((input.memberIds || []).filter(Boolean))];
   const evidence = collectEvidence(memberIds, input.relations, input.entities, 8);
-  const confidence = average(collectConfidence(memberIds, input.relations, input.entities), evidence.length > 0 ? 0.82 : 0.48);
+  const memberConfidences = collectConfidence(memberIds, input.relations, input.entities);
+  const fallback = evidence.length > 0 ? CONFIDENCE.PHASE_WITH_EVIDENCE : CONFIDENCE.PHASE_WITHOUT_EVIDENCE;
+  // Confiança de gate = elo mais fraco dos membros: uma fase não pode ser mais
+  // confiável que o seu elemento menos confiável. A média fica como métrica
+  // secundária de apresentação (confidence_avg).
+  const confidence = combineConfidence(memberConfidences, 'chain', fallback);
+  const confidenceAvg = average(memberConfidences, fallback);
+  // Objetivos reais (header COBOL) dos programas da fase — evidência específica
+  // que substitui o objetivo genérico do template quando disponível.
+  const programObjectives = collectProgramObjectives(input.programs || [], input.entities || []);
   return {
     id: input.id,
     type: 'phase',
@@ -890,6 +1143,7 @@ function makePhase(input) {
     label: input.label,
     kind: input.kind,
     objective: input.objective,
+    objective_evidence: programObjectives,
     trigger: input.trigger,
     actors: uniqueStrings(input.actor_labels || []),
     processing: uniqueStrings([...(input.programs || []), ...(input.procedures || [])]),
@@ -907,8 +1161,24 @@ function makePhase(input) {
     evidence,
     citations: [],
     confidence,
+    confidence_avg: confidenceAvg,
     inferred: evidence.length === 0,
   };
+}
+
+function collectProgramObjectives(programLabels, entities) {
+  const byLabel = new Map();
+  for (const e of entities) {
+    if (e.type === 'program' && e.description) {
+      byLabel.set((e.label || e.name), cleanObjective(e.description));
+    }
+  }
+  const out = [];
+  for (const label of programLabels) {
+    const obj = byLabel.get(label);
+    if (obj) out.push({ program: label, objective: obj });
+  }
+  return out.slice(0, 15);
 }
 
 function attachCitationsToPhases(phases, citations) {
@@ -1652,6 +1922,73 @@ function summarizePhaseClaimStatus(claims) {
   return total > 0 ? `${facts}/${total} campos criticos com fato` : 'sem campos criticos';
 }
 
+function resolveConfidenceTarget(value) {
+  const n = Number(value);
+  if (Number.isFinite(n) && n > 0 && n <= 1) return n;
+  return CONFIDENCE_TARGET_DEFAULT;
+}
+
+/**
+ * Cobertura de confiança da FATIA analisada (entidades + relações do recorte +
+ * fases). Mede a fração de elementos com confiança >= alvo e materializa a fila
+ * de verificação (cada elemento abaixo, com file:line).
+ */
+function buildSliceConfidenceCoverage(entities, relations, phases, target) {
+  const items = [];
+  for (const entity of entities || []) {
+    items.push({
+      kind: 'entity',
+      id: entity.id,
+      type: entity.type,
+      label: entity.label || entity.name,
+      confidence: numeric(entity.confidence),
+      confidence_basis: entity.confidence_basis || (entity.inferred ? 'inferred' : undefined),
+      where: (entity.files && entity.files[0]) ? `${entity.files[0]}:${entity.line || ''}` : '',
+    });
+  }
+  for (const rel of relations || []) {
+    items.push({
+      kind: 'relation',
+      id: `${rel.rel}:${rel.from_id}->${rel.to_id}`,
+      type: rel.rel,
+      label: `${rel.from_label || rel.from} → ${rel.to_label || rel.to}`,
+      confidence: numeric(rel.confidence),
+      confidence_basis: rel.confidence_basis || (rel.dynamic ? 'dynamic' : undefined),
+      where: (Array.isArray(rel.evidence) && rel.evidence[0]) ? rel.evidence[0] : '',
+    });
+  }
+  for (const phase of phases || []) {
+    items.push({
+      kind: 'phase',
+      id: phase.id,
+      type: 'phase',
+      label: phase.label,
+      confidence: numeric(phase.confidence),
+      confidence_basis: phase.inferred ? 'inferred' : 'phase',
+      where: '',
+    });
+  }
+
+  const total = items.length;
+  const meets = items.filter(item => item.confidence >= target).length;
+  const below = items
+    .filter(item => item.confidence < target)
+    .sort((a, b) => a.confidence - b.confidence)
+    .slice(0, 300);
+
+  return {
+    target,
+    coverage_pct: total > 0 ? Math.round((meets / total) * 100) : 0,
+    meets_target: meets,
+    below_target_count: total - meets,
+    below_target: below,
+  };
+}
+
+function numeric(value) {
+  return typeof value === 'number' && !Number.isNaN(value) ? value : 0;
+}
+
 function buildCompletenessScore(input) {
   const phaseAssessments = assessPhaseClaims(input.phases || [], input.claims && input.claims.by_phase ? input.claims.by_phase : {});
   const criticalClaims = (input.claims && input.claims.items || []).filter(item => item.critical);
@@ -1676,8 +2013,19 @@ function buildCompletenessScore(input) {
     criterion('reverse_trace', 'Rastreamento reverso', (input.reverseTrace.traces || []).length > 0 && reverseTraceFacts.length > 0 && input.reverseTrace.primary_terminal && input.reverseTrace.primary_terminal.business_terminal, `${(input.reverseTrace.traces || []).length} cadeia(s) reversa(s).`),
   ];
 
+  if (input.confidenceCoverage) {
+    const cc = input.confidenceCoverage;
+    const targetPct = Math.round((cc.target || CONFIDENCE_TARGET_DEFAULT) * 100);
+    criteria.push(criterion(
+      'confidence',
+      `Confianca >= ${targetPct}%`,
+      cc.coverage_pct >= targetPct,
+      `${cc.coverage_pct}% dos elementos no alvo (${cc.below_target_count} abaixo).`,
+    ));
+  }
+
   const totalPct = Math.round((criteria.reduce((sum, item) => sum + item.score, 0) / criteria.length) * 100);
-  const criticalGaps = criteria.filter(item => ['resolution', 'phases', 'persistence', 'outputs', 'citations', 'reverse_trace'].includes(item.id) && item.status !== 'covered');
+  const criticalGaps = criteria.filter(item => ['resolution', 'phases', 'persistence', 'outputs', 'citations', 'reverse_trace', 'confidence'].includes(item.id) && item.status !== 'covered');
   const status = criticalGaps.length === 0 && totalPct >= 85 ? 'complete' : totalPct >= 55 ? 'partial' : 'draft';
 
   return { total_pct: totalPct, status, criteria };
@@ -1709,9 +2057,17 @@ function buildQualityGate(input) {
   const blockers = [];
   const phaseAssessments = assessPhaseClaims(input.phases || [], input.claims && input.claims.by_phase ? input.claims.by_phase : {});
   for (const criterionItem of input.score.criteria || []) {
-    if (criterionItem.status !== 'covered' && ['resolution', 'phases', 'persistence', 'outputs', 'citations', 'reverse_trace'].includes(criterionItem.id)) {
+    if (criterionItem.status !== 'covered' && ['resolution', 'phases', 'persistence', 'outputs', 'citations', 'reverse_trace', 'confidence'].includes(criterionItem.id)) {
       blockers.push({ id: criterionItem.id, label: criterionItem.label, note: criterionItem.note });
     }
+  }
+  if (input.confidenceCoverage && input.confidenceCoverage.below_target_count > 0) {
+    const cc = input.confidenceCoverage;
+    blockers.push({
+      id: 'confidence:below_target',
+      label: `${cc.below_target_count} elemento(s) abaixo do alvo de confianca`,
+      note: `Confiar so apos confirmar a fila de verificacao (verification-queue.json). Cobertura atual: ${cc.coverage_pct}%.`,
+    });
   }
   for (const phase of phaseAssessments) {
     if (phase.missing.length > 0) {
@@ -1828,6 +2184,14 @@ function buildDiagramArtifacts(view, phases, states, reverseTrace) {
   return { files, dsl: view };
 }
 
+// Limita listas de alta cardinalidade para o documento permanecer focado e
+// legível (um seed de alto fan-out poderia despejar centenas de itens).
+function capJoin(arr, sep, max) {
+  const list = (arr || []).filter(Boolean);
+  if (list.length <= max) return list.join(sep);
+  return list.slice(0, max).join(sep) + `${sep}… (+${list.length - max})`;
+}
+
 function renderTechnicalMarkdown(dossier) {
   const lines = [
     `# Dossie Tecnico: ${dossier.seed}`,
@@ -1867,15 +2231,19 @@ function renderTechnicalMarkdown(dossier) {
   for (const phase of dossier.phases || []) {
     lines.push(`### ${phase.seq}. ${phase.label}`, '');
     lines.push(`- Objetivo: ${phase.objective || 'lacuna'}`);
+    if ((phase.objective_evidence || []).length > 0) {
+      lines.push('- Objetivos reais dos programas (header COBOL):');
+      for (const item of phase.objective_evidence) lines.push(`    - ${item.program}: ${item.objective}`);
+    }
     lines.push(`- Gatilho: ${phase.trigger || 'lacuna'}`);
-    lines.push(`- Atores: ${phase.actors.join(', ') || 'lacuna'}`);
+    lines.push(`- Atores: ${capJoin(phase.actors, ', ', 10) || 'lacuna'}`);
     lines.push(`- Plataformas: ${phase.platforms.join(', ') || 'lacuna'}`);
-    lines.push(`- Processamento: ${phase.processing.join(', ') || 'lacuna'}`);
-    lines.push(`- Entradas: ${phase.inputs.join(', ') || 'lacuna'}`);
-    lines.push(`- Persistencia: ${phase.persistence.join(', ') || 'lacuna'}`);
-    lines.push(`- Saidas: ${phase.outputs.join(', ') || 'lacuna'}`);
-    lines.push(`- Decisoes: ${phase.decisions.join(' | ') || 'lacuna'}`);
-    lines.push(`- Contingencias: ${phase.contingencies.join(' | ') || 'lacuna'}`);
+    lines.push(`- Processamento: ${capJoin(phase.processing, ', ', 25) || 'lacuna'}`);
+    lines.push(`- Entradas: ${capJoin(phase.inputs, ', ', 25) || 'lacuna'}`);
+    lines.push(`- Persistencia: ${capJoin(phase.persistence, ', ', 25) || 'lacuna'}`);
+    lines.push(`- Saidas: ${capJoin(phase.outputs, ', ', 25) || 'lacuna'}`);
+    lines.push(`- Decisoes: ${capJoin(phase.decisions, ' | ', 12) || 'lacuna'}`);
+    lines.push(`- Contingencias: ${capJoin(phase.contingencies, ' | ', 12) || 'lacuna'}`);
     lines.push(`- Claims criticas: ${summarizePhaseClaimStatus(dossier.phase_claims[phase.id] || [])}`);
     lines.push(`- Citacoes: ${(phase.citations || []).join(', ') || 'lacuna'}`);
     lines.push('');
@@ -1900,7 +2268,7 @@ function renderTechnicalMarkdown(dossier) {
   lines.push('| Fase | Atores | Processamento | Persistencia | Saida | Citacoes |');
   lines.push('|------|--------|---------------|--------------|-------|----------|');
   for (const row of dossier.traceability.rows || []) {
-    lines.push(`| ${row.phase} | ${(row.actors || []).join(', ') || '-'} | ${(row.processing || []).join(', ') || '-'} | ${(row.persistence || []).join(', ') || '-'} | ${(row.outputs || []).join(', ') || '-'} | ${(row.citations || []).join(', ') || '-'} |`);
+    lines.push(`| ${row.phase} | ${capJoin(row.actors, ', ', 8) || '-'} | ${capJoin(row.processing, ', ', 20) || '-'} | ${capJoin(row.persistence, ', ', 15) || '-'} | ${capJoin(row.outputs, ', ', 15) || '-'} | ${capJoin(row.citations, ', ', 10) || '-'} |`);
   }
   lines.push('');
   lines.push('## Diagramas', '');
@@ -2071,33 +2439,35 @@ function collectConfidence(memberIds, relations, entities) {
   return values;
 }
 
-function resolvePlatforms(memberIds, entities) {
-  return [...new Set((memberIds || []).map(id => {
-    const entity = (entities || []).find(item => item.id === id);
-    const type = entity ? entity.type : String(id || '').split(':')[0];
-    switch (type) {
-      case 'job':
-      case 'step':
-      case 'dataset': return 'batch-mainframe';
-      case 'program':
-      case 'copybook':
-      case 'field':
-      case 'paragraph': return 'cobol-mainframe';
-      case 'screen':
-      case 'class':
-      case 'module':
-      case 'subroutine':
-      case 'control':
-      case 'component':
-      case 'project': return 'vb6-desktop';
-      case 'table':
-      case 'column':
-      case 'procedure':
-      case 'stored_procedure':
-      case 'sql_script': return 'database';
-      default: return 'legacy';
-    }
-  }).filter(Boolean))];
+function platformForType(type) {
+  switch (type) {
+    case 'job':
+    case 'step':
+    case 'dataset': return 'batch-mainframe';
+    case 'program':
+    case 'copybook':
+    case 'field':
+    case 'paragraph': return 'cobol-mainframe';
+    case 'screen':
+    case 'class':
+    case 'module':
+    case 'subroutine':
+    case 'control':
+    case 'component':
+    case 'project': return 'vb6-desktop';
+    case 'table':
+    case 'column':
+    case 'procedure':
+    case 'stored_procedure':
+    case 'sql_script': return 'database';
+    default: return 'legacy';
+  }
+}
+
+function resolvePlatforms(memberIds) {
+  // O tipo já está codificado no prefixo do id canônico (`type:...`), então não
+  // é preciso lookup de entidade — evita construir Maps grandes em loop quente.
+  return [...new Set((memberIds || []).map(id => platformForType(String(id || '').split(':')[0])).filter(Boolean))];
 }
 
 function matchEntityIds(labels, entities) {
@@ -2113,15 +2483,14 @@ function renderReverseTraceMermaid(reverseTrace) { const lines = ['flowchart RL'
 function buildBusinessNarrative(dossier) { const inputs = dossier.lineage.inputs.join(', ') || 'entradas ainda nao identificadas'; const chain = dossier.phases.map(phase => phase.label).join(' -> ') || dossier.lineage.chain.join(' -> ') || 'cadeia principal ainda nao identificada'; const outputs = dossier.lineage.outputs.join(', ') || 'saidas ainda nao identificadas'; return `A funcionalidade parte de ${inputs}, percorre ${chain} e entrega ${outputs}.`; }
 function inferHandoffChannel(current, next, resolvedDomainPack) {
   const text = [...(current.outputs || []), ...(next.inputs || []), ...(current.processing || []), ...(next.processing || [])].join(' ');
+  // Canais de transferência específicos vêm do domain pack externo, não do fonte.
   if (resolvedDomainPack && resolvedDomainPack.transfer_channels) {
     for (const channel of resolvedDomainPack.transfer_channels) {
-      if (new RegExp(channel, 'i').test(text)) return channel;
+      try { if (new RegExp(channel, 'i').test(text)) return channel; } catch (_) { /* regex/termo invalido */ }
     }
   }
-  if (/ISD/i.test(text)) return 'ISD';
-  if (/CIP|C3/i.test(text)) return 'CIP/C3';
-  if (/CNAB600/i.test(text)) return 'CNAB600';
-  if (/CNAB400/i.test(text)) return 'CNAB400';
+  if (/\b(FILA|QUEUE|MQ)\b/i.test(text)) return 'FILA';
+  if (/\b(API|REST|SERVICE|WS)\b/i.test(text)) return 'API';
   return 'ARQUIVO';
 }
 function inferHandoffTransformation(current, next) {
@@ -2145,7 +2514,12 @@ function inferDataRole(label, kind, relations, resolvedDomainPack) {
   if (/(OUT|SAIDA|REMESSA|EMIT|RELATOR|REPORT)/i.test(value)) return 'outbound';
   if (/(TMP|TEMP|AUX|AUXILIAR|WORK|STG|STAGE)/i.test(value)) return 'staging';
   if (/(PARM|PARAM|DOM|TIPO|STATUS|CONTROLE|CTRL)/i.test(value)) return 'control';
-  if ((resolvedDomainPack && resolvedDomainPack.id === 'cessao-c3') && /(TERMO|CESSAO|FUNDO|RCBVL)/i.test(value)) return kind === 'procedure' ? 'control' : 'master';
+  // Termos de negócio do domínio (master/control) vêm do pack externo.
+  for (const term of (resolvedDomainPack && resolvedDomainPack.business_terms) || []) {
+    if (term && value.toUpperCase().includes(String(term).toUpperCase())) {
+      return kind === 'procedure' ? 'control' : 'master';
+    }
+  }
   if (kind === 'table') {
     const writes = (relations || []).some(rel => ['WRITES', 'UPDATES'].includes(rel.rel) && (rel.to_label || rel.to) === value);
     return writes ? 'master' : 'domain';
@@ -2178,7 +2552,7 @@ function hasMultiplePlatforms(phases) { const platforms = new Set((phases || [])
 function dedupeTerminals(items) { const byId = new Map(); for (const item of items || []) if (item && item.id && !byId.has(item.id)) byId.set(item.id, item); return [...byId.values()]; }
 function groupColumnsByParent(columns) { const grouped = {}; for (const column of columns || []) { const parent = column.parent || 'UNSCOPED'; if (!grouped[parent]) grouped[parent] = []; grouped[parent].push(column.label || column.name); } for (const key of Object.keys(grouped)) grouped[key] = uniqueStrings(grouped[key]).sort(); return grouped; }
 function dedupeGlossary(items) { const byKey = new Map(); for (const item of items || []) { const key = `${item.term}|${item.type}`; if (!byKey.has(key)) byKey.set(key, item); } return [...byKey.values()].sort((a, b) => `${a.type}:${a.term}`.localeCompare(`${b.type}:${b.term}`)); }
-function actionForGap(id) { switch (id) { case 'resolution': return 'Reforcar a resolucao do seed com cluster funcional e flows correlatos.'; case 'phases': return 'Agregar steps tecnicos em fases semanticas com objetivo, gatilho e ator.'; case 'handoffs': return 'Modelar artefatos de transferencia e a mudanca de plataforma.'; case 'persistence': return 'Expandir stored procedures, updates e gravacoes de tabela.'; case 'outputs': return 'Rastrear datasets, mensagens e relatorios de saida.'; case 'rules': return 'Extrair IF/EVALUATE/COND e contratos de dados para regras auditaveis.'; case 'states': return 'Promover campos de status e estados persistidos para o dossie.'; case 'errors': return 'Identificar RC, ABEND, rejeicoes e rotinas de contingencia.'; case 'citations': return 'Anexar citacoes de arquivo, linha e extrator a cada fase relevante.'; case 'reverse_trace': return 'Partir dos artefatos terminais e remontar a cadeia de origem.'; default: return 'Expandir o recorte e coletar evidencia complementar.'; } }
+function actionForGap(id) { switch (id) { case 'resolution': return 'Reforcar a resolucao do seed com cluster funcional e flows correlatos.'; case 'phases': return 'Agregar steps tecnicos em fases semanticas com objetivo, gatilho e ator.'; case 'handoffs': return 'Modelar artefatos de transferencia e a mudanca de plataforma.'; case 'persistence': return 'Expandir stored procedures, updates e gravacoes de tabela.'; case 'outputs': return 'Rastrear datasets, mensagens e relatorios de saida.'; case 'rules': return 'Extrair IF/EVALUATE/COND e contratos de dados para regras auditaveis.'; case 'states': return 'Promover campos de status e estados persistidos para o dossie.'; case 'errors': return 'Identificar RC, ABEND, rejeicoes e rotinas de contingencia.'; case 'citations': return 'Anexar citacoes de arquivo, linha e extrator a cada fase relevante.'; case 'reverse_trace': return 'Partir dos artefatos terminais e remontar a cadeia de origem.'; case 'confidence': return 'Confirmar manualmente os elementos da verification-queue.json e resolver CALL/SQL dinamicos.'; default: return 'Expandir o recorte e coletar evidencia complementar.'; } }
 
 module.exports = {
   build,

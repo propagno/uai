@@ -1,6 +1,6 @@
 {
   "name": "uai-cc",
-  "version": "0.2.7",
+  "version": "0.3.0",
   "description": "UAI – Unidade de Análise Inteligente: framework de reverse engineering para sistemas legados COBOL, JCL, VB6, DB2",
   "homepage": "https://github.com/propagno/uai#readme",
   "bugs": {
@@ -16,6 +16,7 @@
   },
   "files": [
     "README.md",
+    "CHANGELOG.md",
     "bin/uai-cc.js",
     "lib",
     "src",
@@ -35,6 +36,7 @@
     "test": "node --test tests/*.test.cjs",
     "test:coverage": "c8 --check-coverage --lines 82 --functions 85 npm test",
     "sync:commands": "node scripts/sync-commands.cjs",
+    "check:confidential": "node scripts/check-confidential.cjs",
     "prepublishOnly": "node bin/uai-cc.js sync-commands --root . && npm test"
   },
   "dependencies": {

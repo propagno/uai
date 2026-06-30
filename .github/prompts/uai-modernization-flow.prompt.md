@@ -4,7 +4,7 @@
 Use the repo-local UAI engine to fulfill `uai-modernization-flow`.
 ## Invocation
 - Usage: `/uai-modernization-flow <feature|job|programa|tabela|dataset>`
-- Example: `/uai-modernization-flow TERMO-DE-CESSAO`
+- Example: `/uai-modernization-flow PROCESSO-EXEMPLO`
 
 ## Inputs
 - arguments (required): Seed funcional a ser analisado e convertido em blueprint.

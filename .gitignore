@@ -1,3 +1,12 @@
 node_modules/
 *.log
-.uai/cache/
+# Workspace e saídas geradas pela execução do UAI — nunca commitar dados de projetos analisados
+.uai/
+scratch/
+coverage/
+.oxe/
+docs/dominios/
+docs/analysis/
+
+# OXESpace internal MCP config — machine-local token, do not commit
+.mcp.json

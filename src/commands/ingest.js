@@ -29,6 +29,7 @@ cmd
   .description('Varre fontes, classifica artefatos e extrai entidades brutas')
   .option('-s, --source <paths>', 'caminhos extras de fontes (virgula)')
   .option('--no-extract', 'apenas inventario, sem extracao de entidades')
+  .option('--force', 're-extrai todos os arquivos, ignorando o cache incremental (use após atualizar o UAI)')
   .action(async (opts) => {
     log.title('UAI Ingest');
 
@@ -55,9 +56,12 @@ cmd
 
     // Load previous hash cache for incremental extraction
     const csvPath = manifest.modelPath('inventory', 'files.csv');
-    const prevFiles = scanner.readCsv(csvPath);
+    // --force: ignora o cache → re-extrai tudo (necessário quando os extratores
+    // do UAI mudaram mas os fontes não, senão o cache serve extrações antigas).
+    const prevFiles = opts.force ? [] : scanner.readCsv(csvPath);
     const prevHashByPath = {};
     for (const f of prevFiles) { prevHashByPath[f.path] = f.hash; }
+    if (opts.force) log.step('Modo --force: re-extraindo todos os arquivos (cache ignorado)');
 
     // Write updated files.csv
     scanner.writeCsv(files, csvPath);

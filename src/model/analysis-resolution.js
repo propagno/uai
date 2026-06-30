@@ -138,7 +138,21 @@ function rankEntitiesForSeed(entities, seed) {
     .sort((a, b) => b.score - a.score || typeRank(b.entity.type) - typeRank(a.entity.type) || `${a.entity.type}:${a.entity.label || a.entity.name}`.localeCompare(`${b.entity.type}:${b.entity.label || b.entity.name}`));
 }
 
+// Pré-computa endpoints por tipo de relação UMA vez (O(relações)) para evitar
+// varrer todas as relações por entidade (O(entidades × relações)).
+function buildEndpointSet(relations, relTypes, side) {
+  const types = new Set(relTypes);
+  const set = new Set();
+  for (const rel of relations || []) {
+    if (!types.has(rel.rel)) continue;
+    if (side === 'to' || side === 'both') set.add(rel.to_id || rel.to);
+    if (side === 'from' || side === 'both') set.add(rel.from_id || rel.from);
+  }
+  return set;
+}
+
 function rankTerminalEntities(entities, relations, seed, resolvedDomainPack) {
+  const terminalTargets = buildEndpointSet(relations, ['WRITES', 'UPDATES', 'CALLS_SP', 'EMITS', 'GENERATES_REPORT', 'TRANSFERS_TO'], 'to');
   return (entities || [])
     .map(entity => {
       const score = scoreEntitySeed(entity, seed);
@@ -146,10 +160,7 @@ function rankTerminalEntities(entities, relations, seed, resolvedDomainPack) {
       if (score === 0 && terminalScore === 0) {
         return null;
       }
-      const relationBoost = (relations || []).some(rel =>
-        (rel.to_id || rel.to) === entity.id &&
-        ['WRITES', 'UPDATES', 'CALLS_SP', 'EMITS', 'GENERATES_REPORT', 'TRANSFERS_TO'].includes(rel.rel)
-      ) ? 20 : 0;
+      const relationBoost = terminalTargets.has(entity.id) ? 20 : 0;
       return {
         entity,
         score: score + terminalScore + relationBoost,
@@ -162,9 +173,11 @@ function rankTerminalEntities(entities, relations, seed, resolvedDomainPack) {
 
 function rankBridgeEntities(entities, relations, seed, resolvedDomainPack) {
   const bridgeSeed = [seed, ...(resolvedDomainPack.business_terms || []), ...(resolvedDomainPack.external_systems || [])].join(' ');
+  const bridgeEndpoints = buildEndpointSet(relations, ['TRANSFERS_TO', 'USES_DLL', 'CALLS_SP', 'TRIGGERS', 'HANDLES_EVENTS', 'USES'], 'both');
+  const bridgeTypes = new Set(['job', 'step', 'program', 'screen', 'project', 'component', 'class', 'module', 'procedure', 'table', 'dataset']);
   return (entities || [])
     .map(entity => {
-      if (!['job', 'step', 'program', 'screen', 'project', 'component', 'class', 'module', 'procedure', 'table', 'dataset'].includes(entity.type)) {
+      if (!bridgeTypes.has(entity.type)) {
         return null;
       }
       const score = scoreText(bridgeSeed, [
@@ -175,10 +188,7 @@ function rankBridgeEntities(entities, relations, seed, resolvedDomainPack) {
         ...(entity.semantic_tags || []),
       ]);
       const handoffScore = domainPack.rankHandoffLabel(resolvedDomainPack, [entity.label, entity.name, entity.description].filter(Boolean).join(' '));
-      const relationBoost = (relations || []).some(rel =>
-        ((rel.from_id || rel.from) === entity.id || (rel.to_id || rel.to) === entity.id) &&
-        ['TRANSFERS_TO', 'USES_DLL', 'CALLS_SP', 'TRIGGERS', 'HANDLES_EVENTS', 'USES'].includes(rel.rel)
-      ) ? 18 : 0;
+      const relationBoost = bridgeEndpoints.has(entity.id) ? 18 : 0;
       if (score === 0 && handoffScore === 0 && relationBoost === 0) {
         return null;
       }

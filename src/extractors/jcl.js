@@ -30,6 +30,18 @@ function extract(filePath, fileHash) {
   let ddLineNum    = 0;
   let ddName       = null;
   let pendingCommentBlock = [];
+  // Comentários que vêm DEPOIS do EXEC (antes do 1º DD) descrevem o step recém-
+  // iniciado — estilo comum em JCL legado. Coletados e anexados ao step.
+  let currentStepEntity = null;
+  let postExecComments  = [];
+  let collectingPostExec = false;
+  const flushPostExecComment = () => {
+    if (collectingPostExec && currentStepEntity && !currentStepEntity.description && postExecComments.length) {
+      Object.assign(currentStepEntity, buildCommentMetadata(postExecComments, filePath, 'jcl_comment'));
+    }
+    collectingPostExec = false;
+    postExecComments = [];
+  };
 
   function flushDD(opds, lineNum, ddname) {
     const opdsUpper = opds.toUpperCase();
@@ -37,10 +49,25 @@ function extract(filePath, fileHash) {
     const dispMatch = opdsUpper.match(/DISP=\(?([A-Z]+)/);
 
     if (!dsnMatch) return;
-    const dsn  = dsnMatch[1].replace(/[()]/g, '');
+    const dsnRaw = dsnMatch[1];
+    const dsn  = dsnRaw.replace(/[()]/g, '');
     const disp = dispMatch ? dispMatch[1].trim() : 'SHR';
 
-    entities.push(makeEntity('dataset', dsn, filePath, lineNum, 0.9, fileHash));
+    // Atributos de DCB e geração GDG (para tabelas de dataset ricas).
+    const dispFull = (opdsUpper.match(/DISP=(\([^)]*\)|[A-Z]+)/) || [])[1] || disp;
+    const lrecl    = (opdsUpper.match(/LRECL=(\d+)/) || [])[1] || null;
+    const recfm    = (opdsUpper.match(/RECFM=([A-Z]+)/) || [])[1] || null;
+    const blksize  = (opdsUpper.match(/BLKSIZE=(\d+)/) || [])[1] || null;
+    const gdgMatch = dsnRaw.match(/\((\+?\-?\d+)\)\s*$/);
+    const gdg      = gdgMatch ? gdgMatch[1] : null;
+
+    entities.push(makeEntity('dataset', dsn, filePath, lineNum, 0.9, fileHash, {
+      ...(lrecl   && { lrecl: Number(lrecl) }),
+      ...(recfm   && { recfm }),
+      ...(blksize && { blksize: Number(blksize) }),
+      ...(dispFull && { disp: dispFull }),
+      ...(gdg     && { gdg }),
+    }));
 
     if (currentStep) {
       // SHR / OLD = reading; NEW / MOD / CATLG = writing
@@ -69,10 +96,9 @@ function extract(filePath, fileHash) {
     }
 
     if (raw.startsWith('//*')) {
-      pendingCommentBlock.push({
-        line: lineNum,
-        text: normalizeJclComment(raw.slice(3)),
-      });
+      const comment = { line: lineNum, text: normalizeJclComment(raw.slice(3)) };
+      pendingCommentBlock.push(comment);
+      if (collectingPostExec) postExecComments.push(comment);
       continue;
     }
 
@@ -86,6 +112,8 @@ function extract(filePath, fileHash) {
 
     // Flush pending DD before processing new statement
     if (ddOperands !== null) { flushDD(ddOperands, ddLineNum, ddName); ddOperands = null; }
+    // Anexa ao step os comentários que apareceram logo após o seu EXEC.
+    flushPostExecComment();
 
     // Fixed-format JCL: NAME is cols 3-10 (0-indexed 2-9), exactly 8 chars
     const rawName    = raw.slice(2, 10).trim();
@@ -136,13 +164,18 @@ function extract(filePath, fileHash) {
 
         stepSeq++;
         currentStep = name || `STEP${stepSeq}`;
-        entities.push(makeEntity('step', currentStep, filePath, lineNum, 1.0, fileHash, {
+        const stepEntity = makeEntity('step', currentStep, filePath, lineNum, 1.0, fileHash, {
           parent:     jobName || procName,
           parentType: jobName ? 'job' : 'procedure',
           seq:        stepSeq,
           ...buildCommentMetadata(pendingCommentBlock, filePath, 'jcl_comment'),
-        }));
+        });
+        entities.push(stepEntity);
         pendingCommentBlock = [];
+        // Passa a coletar comentários pós-EXEC como objetivo do step (se ainda sem descrição).
+        currentStepEntity = stepEntity;
+        postExecComments = [];
+        collectingPostExec = true;
 
         if (jobName || procName) {
           relations.push(makeRel('CONTAINS', jobName || procName, currentStep, filePath, lineNum, 1.0, fileHash, {
@@ -186,6 +219,7 @@ function extract(filePath, fileHash) {
 
   // Flush final DD if file ends mid-continuation
   if (ddOperands !== null) flushDD(ddOperands, ddLineNum, ddName);
+  flushPostExecComment();
 
   return { entities, relations };
 }
@@ -232,9 +266,6 @@ function detectJclSemanticTags(lines) {
   const text = lines.join(' ').toUpperCase();
   const tags = ['jcl'];
 
-  if (text.includes('TERMO DE CESSAO')) {
-    tags.push('termo-de-cessao');
-  }
   if (text.includes('RELATORIO')) {
     tags.push('relatorio');
   }

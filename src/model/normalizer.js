@@ -10,6 +10,8 @@ const {
   inferEntityType,
 } = require('./identity');
 
+const { combineConfidence, CONFIDENCE, BASIS } = require('./confidence');
+
 /**
  * Reads entities.jsonl and normalizes into:
  *   - entities: Map<entityId → entity record>
@@ -56,7 +58,8 @@ function normalize(entitiesJsonlPath) {
       continue;
     }
 
-    const key = `${rel.rel}:${fromEntity.id}:${toEntity.id}`;
+    // `value` entra na chave para preservar estados distintos (SETS_STATE).
+    const key = `${rel.rel}:${fromEntity.id}:${toEntity.id}${rel.value !== undefined ? ':' + rel.value : ''}`;
     const evidence = `${rel.file}:${rel.line}`;
 
     if (!relationMap.has(key)) {
@@ -75,6 +78,13 @@ function normalize(entitiesJsonlPath) {
         extractor:   rel.extractor,
         ...(rel.dynamic       && { dynamic: rel.dynamic }),
         ...(rel.resolvedFrom  && { resolvedFrom: normalizeName(rel.resolvedFrom) }),
+        ...(rel.via           && { via: rel.via }),
+        ...(rel.fk_columns    && { fk_columns: rel.fk_columns }),
+        ...(rel.ref_columns   && { ref_columns: rel.ref_columns }),
+        ...(rel.value !== undefined && { value: rel.value }),
+        ...(rel.keys           && { keys: rel.keys }),
+        ...(rel.guard          && { guard: rel.guard }),
+        ...(rel.confidence_basis && { confidence_basis: rel.confidence_basis }),
       });
       continue;
     }
@@ -83,9 +93,13 @@ function normalize(entitiesJsonlPath) {
     if (!existing.evidence.includes(evidence)) {
       existing.evidence.push(evidence);
     }
-    if ((rel.confidence || 0) > (existing.confidence || 0)) {
-      existing.confidence = rel.confidence;
-    }
+    // Duas extrações da MESMA relação são evidências que se corroboram:
+    // a confiança resultante é a do elo mais forte.
+    existing.confidence = combineConfidence(
+      [existing.confidence, rel.confidence],
+      'corroborate',
+      existing.confidence || 0,
+    );
   }
 
   return {
@@ -105,10 +119,24 @@ function normalizeEntityRecord(record) {
     line:       record.line,
     confidence: record.confidence,
     extractor:  record.extractor,
+    ...(record.confidence_basis         && { confidence_basis: record.confidence_basis }),
+    ...(record.source                   && { source: record.source }),
     ...(record.level !== undefined      && { level: record.level }),
     ...(record.pic                      && { pic: record.pic }),
     ...(record.occurs                   && { occurs: record.occurs }),
     ...(record.controlType              && { controlType: record.controlType }),
+    ...(record.caption                  && { caption: String(record.caption).trim() }),
+    ...(record.lrecl   !== undefined    && { lrecl: record.lrecl }),
+    ...(record.recfm                    && { recfm: record.recfm }),
+    ...(record.blksize !== undefined    && { blksize: record.blksize }),
+    ...(record.disp                     && { disp: record.disp }),
+    ...(record.gdg                      && { gdg: record.gdg }),
+    ...(record.data_type                && { data_type: record.data_type }),
+    ...(record.is_view                  && { is_view: true }),
+    ...(record.resolution               && { resolution: record.resolution }),
+    ...(record.source_column            && { source_column: normalizeName(record.source_column) }),
+    ...(record.source_table             && { source_table: normalizeName(record.source_table) }),
+    ...(record.order !== undefined      && { order: record.order }),
     ...(record.seq !== undefined        && { seq: record.seq }),
     ...(record.fileHash                 && { fileHash: record.fileHash }),
     ...(record.inferred                 && { inferred: true }),
@@ -139,9 +167,12 @@ function mergeEntity(entityMap, entity) {
     }
   }
 
-  if ((entity.confidence || 0) > (existing.confidence || 0)) {
-    existing.confidence = entity.confidence;
-  }
+  // Mesma entidade vista em vários arquivos: evidências corroboram.
+  existing.confidence = combineConfidence(
+    [existing.confidence, entity.confidence],
+    'corroborate',
+    existing.confidence || 0,
+  );
 
   if (entity.inferred && !existing.inferred) {
     existing.inferred = true;
@@ -150,6 +181,13 @@ function mergeEntity(entityMap, entity) {
   if (existing.seq === undefined && entity.seq !== undefined) {
     existing.seq = entity.seq;
   }
+
+  // Atributos "primeiro não-vazio vence" — garante que o host-struct reconstruído
+  // não perca resolution/source_table ao ser corroborado por uma inclusão inferida.
+  for (const attr of ['resolution', 'source_table', 'source_column']) {
+    if (existing[attr] === undefined && entity[attr] !== undefined) existing[attr] = entity[attr];
+  }
+  if (existing.order === undefined && entity.order !== undefined) existing.order = entity.order;
 
   mergeSemanticMetadata(existing, entity);
 }
@@ -211,7 +249,8 @@ function resolveEndpoint(rel, side, entityMap, lookups) {
     type: inferredType,
     name: canonicalName,
     parent: explicitParent || undefined,
-    confidence: 0.3,
+    confidence: CONFIDENCE.INFERRED_ENDPOINT,
+    confidence_basis: BASIS.INFERRED,
     extractor: 'inferred',
     inferred: true,
     file: null,

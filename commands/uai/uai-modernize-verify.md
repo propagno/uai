@@ -51,7 +51,7 @@ next_commands:
   - uai-modernize
   - uai-analyze
 examples:
-  - /uai-modernize-verify TERMO-DE-CESSAO --target-repo ./apps/term-service
-  - /uai-modernize-verify CNAB600 --target-repo ../modernized-cnab --refresh
+  - /uai-modernize-verify PROCESSO-EXEMPLO --target-repo ./apps/exemplo-service
+  - /uai-modernize-verify JOB-BATCH-01 --target-repo ../modernized-app --refresh
 ---
 Use este comando para fechar o ciclo legado -> blueprint -> implementacao alvo, medindo o quanto o repositorio Java/Azure realmente aderiu ao desenho produzido pelo UAI.
