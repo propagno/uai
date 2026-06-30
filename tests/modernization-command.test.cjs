@@ -30,11 +30,11 @@ function createLegacyFixture(rootDir) {
   fs.mkdirSync(rootDir, { recursive: true });
 
   const job = [
-    '//* TERMO DE CESSAO',
+    '//* PEDIDO DE VENDA',
     '//TRMJOB   JOB',
     '//STEP1    EXEC PGM=TRMMAIN',
-    '//IN1      DD DSN=TERM.CESSAO.IN,DISP=SHR',
-    '//OUT1     DD DSN=TERM.CESSAO.OUT,DISP=NEW',
+    '//IN1      DD DSN=TERM.VENDA.IN,DISP=SHR',
+    '//OUT1     DD DSN=TERM.VENDA.OUT,DISP=NEW',
   ].join('\n');
 
   const cobolMain = [
@@ -43,20 +43,20 @@ function createLegacyFixture(rootDir) {
     ff('ENVIRONMENT DIVISION.'),
     ff('INPUT-OUTPUT SECTION.'),
     ff('FILE-CONTROL.'),
-    ff("    SELECT ARQ-TERMO ASSIGN TO 'TERM.CESSAO.IN'."),
-    ff("    SELECT ARQ-SAIDA ASSIGN TO 'TERM.CESSAO.OUT'."),
+    ff("    SELECT ARQ-PEDIDO ASSIGN TO 'TERM.VENDA.IN'."),
+    ff("    SELECT ARQ-SAIDA ASSIGN TO 'TERM.VENDA.OUT'."),
     ff('DATA DIVISION.'),
     ff('WORKING-STORAGE SECTION.'),
     ff("01 WS-STATUS PIC X(02) VALUE 'OK'."),
     ff('PROCEDURE DIVISION.'),
-    ff('    OPEN INPUT ARQ-TERMO OUTPUT ARQ-SAIDA.'),
-    ff('    READ ARQ-TERMO.'),
+    ff('    OPEN INPUT ARQ-PEDIDO OUTPUT ARQ-SAIDA.'),
+    ff('    READ ARQ-PEDIDO.'),
     ff("    CALL 'TRMSQL'."),
     ff("    IF WS-STATUS = 'ER'"),
-    ff("       DISPLAY 'TERMO DE CESSAO INVALIDO'"),
+    ff("       DISPLAY 'PEDIDO DE VENDA INVALIDO'"),
     ff('    END-IF.'),
     ff('    WRITE REG-SAIDA.'),
-    ff('    CLOSE ARQ-TERMO ARQ-SAIDA.'),
+    ff('    CLOSE ARQ-PEDIDO ARQ-SAIDA.'),
     ff('    GOBACK.'),
   ].join('\n');
 
@@ -64,37 +64,37 @@ function createLegacyFixture(rootDir) {
     ff('IDENTIFICATION DIVISION.'),
     ff('PROGRAM-ID. TRMSQL.'),
     ff('WORKING-STORAGE SECTION.'),
-    ff('01 WS-TERMO PIC X(10).'),
+    ff('01 WS-PEDIDO PIC X(10).'),
     ff('PROCEDURE DIVISION.'),
     ff('EXEC SQL'),
-    ff('  INSERT INTO TMOD_TERMO_CESSAO (ID_TERMO) VALUES (:WS-TERMO)'),
+    ff('  INSERT INTO TB_MODELO (ID_PEDIDO) VALUES (:WS-PEDIDO)'),
     ff('END-EXEC.'),
     ff('GOBACK.'),
   ].join('\n');
 
   const vb6Form = [
     'VERSION 5.00',
-    'Begin VB.Form FrmServicoTermoCessao',
+    'Begin VB.Form FrmServicoProcessoExemplo',
     'End',
     'Private Sub CmdAssinar_Click()',
-    '  cn.CommandText = "PR_TERMO_CESSAO_ASSINA"',
-    '  Open "termo_cessao_assinado.txt" For Output As #1',
+    '  cn.CommandText = "PR_PROC"',
+    '  Open "proc_exemplo_assinado.txt" For Output As #1',
     'End Sub',
   ].join('\n');
 
   const sqlText = [
-    'CREATE PROCEDURE PR_TERMO_CESSAO_ASSINA',
+    'CREATE PROCEDURE PR_PROC',
     'AS',
     'BEGIN',
-    "  UPDATE TMOD_TERMO_CESSAO SET STATUS = 'ASSINADO';",
+    "  UPDATE TB_MODELO SET STATUS = 'ASSINADO';",
     'END',
   ].join('\n');
 
   fs.writeFileSync(path.join(rootDir, 'TRMJOB.jcl'), job, 'latin1');
   fs.writeFileSync(path.join(rootDir, 'TRMMAIN.cbl'), cobolMain, 'latin1');
   fs.writeFileSync(path.join(rootDir, 'TRMSQL.cbl'), cobolSql, 'latin1');
-  fs.writeFileSync(path.join(rootDir, 'FrmServicoTermoCessao.frm'), vb6Form, 'latin1');
-  fs.writeFileSync(path.join(rootDir, 'PR_TERMO_CESSAO_ASSINA.sql'), sqlText, 'utf-8');
+  fs.writeFileSync(path.join(rootDir, 'FrmServicoProcessoExemplo.frm'), vb6Form, 'latin1');
+  fs.writeFileSync(path.join(rootDir, 'PR_PROC.sql'), sqlText, 'utf-8');
 }
 
 function createTargetFixture(rootDir) {
@@ -119,29 +119,29 @@ function createTargetFixture(rootDir) {
     'ENTRYPOINT ["java","-jar","/app.jar"]',
   ].join('\n'), 'utf-8');
 
-  fs.writeFileSync(path.join(javaDir, 'TermoCessaoValidationController.java'), [
+  fs.writeFileSync(path.join(javaDir, 'ProcessoExemploValidationController.java'), [
     'package com.example.termo;',
     '@RestController',
-    '@RequestMapping("/api/termo/cessao/validation")',
-    'public class TermoCessaoValidationController {',
+    '@RequestMapping("/api/processo/exemplo/validation")',
+    'public class ProcessoExemploValidationController {',
     '  @PostMapping',
     '  public void validate() {}',
     '}',
   ].join('\n'), 'utf-8');
 
-  fs.writeFileSync(path.join(javaDir, 'TermoCessaoPersistenceService.java'), [
+  fs.writeFileSync(path.join(javaDir, 'ProcessoExemploPersistenceService.java'), [
     'package com.example.termo;',
     '@Service',
-    'public class TermoCessaoPersistenceService {',
+    'public class ProcessoExemploPersistenceService {',
     '  public void persist() {}',
     '}',
   ].join('\n'), 'utf-8');
 
-  fs.writeFileSync(path.join(javaDir, 'TermoCessaoIngestionWorker.java'), [
+  fs.writeFileSync(path.join(javaDir, 'ProcessoExemploIngestionWorker.java'), [
     'package com.example.termo;',
     '@Component',
     '@EnableBatchProcessing',
-    'public class TermoCessaoIngestionWorker {',
+    'public class ProcessoExemploIngestionWorker {',
     '}',
   ].join('\n'), 'utf-8');
 
@@ -149,18 +149,18 @@ function createTargetFixture(rootDir) {
     'apiVersion: apps/v1',
     'kind: Deployment',
     'metadata:',
-    '  name: termo-cessao',
+    '  name: processo-exemplo',
     'spec:',
     '  template:',
     '    spec:',
     '      containers:',
-    '        - name: termo-cessao',
+    '        - name: processo-exemplo',
     '          image: termo:latest',
     '---',
     'apiVersion: batch/v1',
     'kind: CronJob',
     'metadata:',
-    '  name: termo-cessao-batch',
+    '  name: processo-exemplo-batch',
   ].join('\n'), 'utf-8');
 
   fs.writeFileSync(path.join(infraDir, 'main.bicep'), [
@@ -181,9 +181,9 @@ test('modernize command generates Azure+Java blueprint package from legacy analy
   createLegacyFixture(sourceRoot);
 
   runNode(repoRoot, tmpDir, ['init', '-y', '-n', 'UAI Modernize', '-s', sourceRoot]);
-  runNode(repoRoot, tmpDir, ['modernize', 'termo-de-cessao', '--target', 'azure-java-aks', '--strategy', 'strangler', '--profile', 'auto']);
+  runNode(repoRoot, tmpDir, ['modernize', 'processo-exemplo', '--target', 'azure-java-aks', '--strategy', 'strangler', '--profile', 'auto']);
 
-  const modernizationDir = path.join(tmpDir, '.uai', 'modernization', 'termo-de-cessao');
+  const modernizationDir = path.join(tmpDir, '.uai', 'modernization', 'processo-exemplo');
   const blueprintPath = path.join(modernizationDir, 'blueprint.md');
   const dslPath = path.join(modernizationDir, 'target-architecture.dsl');
   const servicesPath = path.join(modernizationDir, 'service-candidates.json');
@@ -223,10 +223,10 @@ test('modernize-verify compares blueprint with target repo inventory', { concurr
   createTargetFixture(targetRoot);
 
   runNode(repoRoot, tmpDir, ['init', '-y', '-n', 'UAI Modernize Verify', '-s', sourceRoot]);
-  runNode(repoRoot, tmpDir, ['modernize', 'termo-de-cessao', '--target', 'azure-java-aks']);
-  runNode(repoRoot, tmpDir, ['modernize-verify', 'termo-de-cessao', '--target-repo', targetRoot]);
+  runNode(repoRoot, tmpDir, ['modernize', 'processo-exemplo', '--target', 'azure-java-aks']);
+  runNode(repoRoot, tmpDir, ['modernize-verify', 'processo-exemplo', '--target-repo', targetRoot]);
 
-  const verifyDir = path.join(tmpDir, '.uai', 'modernization', 'termo-de-cessao', 'target-verify');
+  const verifyDir = path.join(tmpDir, '.uai', 'modernization', 'processo-exemplo', 'target-verify');
   const inventoryPath = path.join(verifyDir, 'target-inventory.json');
   const adherencePath = path.join(verifyDir, 'adherence.json');
   const driftPath = path.join(verifyDir, 'drift-report.md');

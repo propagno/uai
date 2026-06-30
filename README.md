@@ -74,6 +74,7 @@ uai-cc search         -> busca
 uai-cc impact         -> analise de impacto
 uai-cc lineage        -> rastreio de dados
 uai-cc doc            -> documentacao
+uai-cc scaffold       -> documentacao por dominio (DDD) + loop agentico
 uai-cc executive      -> visao executiva
 uai-cc verify         -> cobertura e qualidade
 uai-cc serve          -> interface web
@@ -123,12 +124,29 @@ Agentes suportados pelo instalador:
 
 ## Destaques desta versao
 
-- `uai-cc analyze` virou o comando principal para gerar dossies de funcionalidade.
+Novidades em **0.3.0** — documentacao por dominio (DDD) e loop agentico:
+
+- `uai-cc scaffold` gera o esqueleto **dominio -> funcionalidade -> fluxo** a partir do modelo.
+- **Deteccao de dominios ancorada em dados (DDD)**: o dominio passa a ser uma **familia de agregado**
+  (a entidade de negocio nos nomes de tabela) + os programas atribuidos por posse/leitura; utilitarios e
+  fragmentos vao para um unico contexto `compartilhado`, em vez de virarem pastas sem sentido.
+- **Loop agentico sem API key**: `scaffold --briefs` emite, por funcionalidade, um `_BRIEF.md` com a
+  evidencia e um **mapa de leitura do codigo** (arquivo:linha) para o agente do terminal escrever o
+  detalhamento sem inventar; `docs/DOMAIN-COVERAGE.md` rastreia o progresso.
+- **Doc-QA grader bloqueante**: gate deterministico de qualidade (citacoes, snippets, programas-nucleo
+  cobertos, anti-invencao) — so marca `documentado` quando passa, e lista o que falta quando nao.
+- **Reconstrucao de host-struct DB2 / `EXEC SQL INCLUDE`**, **fases batch dirigidas pelos steps do JCL** e
+  **condicoes (guards) na maquina de estados**.
+- `uai-cc ingest --force` re-extrai tudo ignorando o cache incremental (apos atualizar o UAI).
+
+Base consolidada nas versoes anteriores:
+
+- `uai-cc analyze` e o comando principal para gerar dossies de funcionalidade.
 - `domain pack` com `auto`, `generic` e packs especializados para acelerar resolucao e nomenclatura.
-- `reverse trace` passou a priorizar **terminais de negocio** em vez de terminais tecnicos genericos.
-- `claims` e `citations` passaram a separar claramente **fato** de **inferencia**.
-- `quality-gate.json` agora bloqueia `complete` quando a fase tem lacuna critica sem fato navegavel.
-- `traceability.md` e `evidence.json` agora saem prontos para auditoria e comparacao entre execucoes.
+- `reverse trace` prioriza **terminais de negocio** em vez de terminais tecnicos genericos.
+- `claims` e `citations` separam claramente **fato** de **inferencia**.
+- `quality-gate.json` bloqueia `complete` quando a fase tem lacuna critica sem fato navegavel.
+- `traceability.md` e `evidence.json` saem prontos para auditoria e comparacao entre execucoes.
 - `uai-cc modernize` gera blueprint deterministico Azure + Java com service candidates, contratos, dados e ondas.
 - `uai-cc modernize-verify` fecha o loop entre blueprint e repositório alvo Java/Azure.
 
@@ -585,6 +603,62 @@ Gera documentacao markdown a partir do modelo, sem escrita manual.
 .uai/docs/jobs/JBATCH01.md       # dossie por job
 .uai/docs/data-lineage/*.md      # lineage por tabela
 ```
+
+---
+
+## Documentacao por dominio (DDD) e loop agentico
+
+O `scaffold` gera o esqueleto **dominio -> funcionalidade -> fluxo** e abre o caminho para um
+**loop agentico** que produz documentacao em nivel de referencia — inclusive quando o UAI roda
+dentro de um terminal de AI provider **sem API key**.
+
+```bash
+# Detecta dominios (DDD ancorado em dados) e escreve .uai/domains.yaml
+uai-cc scaffold --detect-only
+
+# Gera o esqueleto + briefs + painel de cobertura
+uai-cc scaffold --briefs
+```
+
+**Dominios ancorados em dados (DDD).** Em vez de tratar cada cluster de programas como um dominio,
+o UAI ancora o **bounded context** na **familia de agregado** — a entidade de negocio que aparece nos
+nomes de tabela (ex.: tabelas `T<ENTIDADE>_...`). Cada programa e atribuido por **posse/leitura** de
+dados; utilitarios transversais e fragmentos vao para um unico contexto `compartilhado`, em vez de
+gerarem pastas sem sentido. Cada contexto expoe `aggregates`, `ubiquitous_language`, `shared_kernel` e um
+`context_map` (quem le/escreve de quem). Revise e confirme em `.uai/domains.yaml`.
+
+```bash
+uai-cc scaffold --strategy data        # padrao (DDD por dados)
+uai-cc scaffold --strategy community    # clustering por grafo de programas
+uai-cc scaffold --min-size 10           # menos dominios, mais coesos
+```
+
+**Nomes legiveis (glossario local).** O UAI nomeia cada contexto pelo substantivo do agregado. Um
+glossario **local** opcional (`.uai/glossary.yaml`) mapeia abreviacoes para nomes de negocio legiveis,
+sem embarcar vocabulario especifico no codigo (veja `templates/glossary.example.yaml`).
+
+**Loop agentico (sem API key).** Com `--briefs`, cada funcionalidade ganha um `_BRIEF.md` com a
+evidencia ja extraida e um **mapa de leitura do codigo** (arquivo:linha) para o agente do terminal
+ler a fonte e escrever `fluxos-tecnicos/detalhamento.md` sem inventar. O painel
+`docs/DOMAIN-COVERAGE.md` dirige o trabalho e e idempotente/retomavel:
+
+```
+docs/
+  DOMAIN-COVERAGE.md                 # painel: ✅ documentado · 🟠 incompleto · 🟡 brief · ⬜ pendente
+  ENRICHMENT-GUIDE.md                # como o agente deve proceder
+  dominios/<contexto>/README.md      # bounded context: agregados, linguagem ubiqua, context map
+  dominios/<contexto>/<func>/_BRIEF.md
+  dominios/<contexto>/<func>/_QA.json # evidencia esperada para o grader
+```
+
+**Doc-QA grader bloqueante.** O painel so marca uma funcionalidade como **documentada** (✅) quando o
+`detalhamento.md` passa num gate deterministico: minimo de **citacoes** `arquivo:linha`, de **snippets**
+de codigo, **todos os programas-nucleo cobertos** e **zero citacao a arquivo inexistente** (anti-invencao).
+Abaixo disso fica 🟠 com a lista exata do que falta — e o que faz o loop convergir sozinho a qualidade de
+referencia.
+
+> Se voce atualizou o UAI, rode `uai-cc ingest --force` para re-extrair tudo (o cache e por hash de
+> conteudo e nao reflete melhorias nos extratores automaticamente).
 
 ---
 

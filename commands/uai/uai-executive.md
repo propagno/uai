@@ -54,8 +54,8 @@ next_commands:
   - uai-verify
 examples:
   - /uai-executive
-  - /uai-executive "Termo de Cessao"
-  - /uai-executive "NFE CNAB400" --scope both --format both --full
+  - /uai-executive "Processo Exemplo"
+  - /uai-executive "Relatorio Batch" --scope both --format both --full
   - /uai-executive "PROCESSAMENTO" --scope focused --format mermaid --depth 2
 ---
 Use este comando para materializar uma leitura executiva sustentada pelo modelo UAI, com foco em narrativa de fluxo, dados e persistencia sem depender de renderizacao externa. Em modelos grandes, o recorte focado usa timeout com fallback parcial para evitar travamentos e registrar explicitamente degradacao de cobertura.

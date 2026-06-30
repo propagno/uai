@@ -103,6 +103,8 @@ function buildBatchFlows(batchFlows, entityById, relationIndex, opts) {
         id: step.id,
         name: step.name,
         label: step.label || step.name,
+        description: step.description || '',
+        semantic_tags: step.semantic_tags || [],
         seq: step.seq ?? null,
         conditionText: step.conditionText || null,
         direct_programs: uniqueEntities(directPrograms),
@@ -186,12 +188,44 @@ function buildScreenFlows(entities, relations, entityById) {
       .filter(Boolean)
       .map(pickEntity);
 
-    const subjectIds = new Set([
+    // Conjunto de "donos" da tela: a própria tela + suas subrotinas + controles.
+    // Relações de ação (CALLS_SP/READS/WRITES/NAVIGATES_TO) partem daqui.
+    const ownerIds = new Set([
       screen.id,
       ...routines.map(routine => routine.id),
+      ...handledControls.map(item => item.id),
+    ]);
+    const relFromOwner = relations.filter(rel => ownerIds.has(rel.from_id));
+    const toEntities = (relName, types) => relFromOwner
+      .filter(rel => rel.rel === relName)
+      .map(rel => entityById.get(rel.to_id))
+      .filter(entity => entity && (!types || types.includes(entity.type)))
+      .map(pickEntity);
+
+    const procedures = toEntities('CALLS_SP', ['procedure']);
+    const programs = toEntities('CALLS', ['program']);
+    const dataObjects = uniqueEntities([
+      ...toEntities('READS', ['table', 'dataset']),
+      ...toEntities('WRITES', ['table', 'dataset']),
+      ...toEntities('UPDATES', ['table', 'dataset']),
+    ]);
+    // Navegação tela→tela: alvo deve ser outra screen.
+    const navigations = relFromOwner
+      .filter(rel => rel.rel === 'NAVIGATES_TO')
+      .map(rel => {
+        const target = entityById.get(rel.to_id);
+        if (!target || target.type !== 'screen') return null;
+        return { from: rel.from_label || rel.from, to: target.label || target.name, to_id: target.id, confidence: rel.confidence };
+      })
+      .filter(Boolean);
+
+    const subjectIds = new Set([
+      ...ownerIds,
       ...components.map(component => component.id),
       ...handledClasses.map(item => item.id),
-      ...handledControls.map(item => item.id),
+      ...procedures.map(item => item.id),
+      ...programs.map(item => item.id),
+      ...dataObjects.map(item => item.id),
     ]);
 
     return {
@@ -205,9 +239,10 @@ function buildScreenFlows(entities, relations, entityById) {
       components: uniqueEntities(components),
       classes: uniqueEntities(handledClasses),
       controls: uniqueEntities(handledControls),
-      programs: [],
-      procedures: [],
-      data_objects: [],
+      programs: uniqueEntities(programs),
+      procedures: uniqueEntities(procedures),
+      data_objects: dataObjects,
+      navigations,
       contracts: [],
       subject_ids: [...subjectIds],
       tokens: buildFlowTokens([

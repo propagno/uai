@@ -6,11 +6,11 @@ Mode: wrapper
 ## Objective
 Gera um dossie autonomo de funcionalidade com foco em fluxo, fases, evidencias, gaps e diagramas.
 ## Invocation
-- Usage: `/uai-analyze <seed> [--audience tech|business|both] [--seed-type <type>] [--trace forward|reverse|both] [--mode autonomous|single-pass] [--domain-pack auto|generic|cessao-c3] [--terminal <id|label>] [--facts-only] [--depth N] [--full] [--refresh] [--out .uai/analysis]`
-- Example: `/uai-analyze TERMO-CESSAO`
-- Example: `/uai-analyze CNAB600 --audience both --trace both --mode autonomous --full`
-- Example: `/uai-analyze TERMO-CESSAO --domain-pack cessao-c3 --terminal PR_TERMO_CESSAO_ASSINA`
-- Example: `/uai-analyze TERMO-CESSAO --facts-only`
+- Usage: `/uai-analyze <seed> [--audience tech|business|both] [--seed-type <type>] [--trace forward|reverse|both] [--mode autonomous|single-pass] [--domain-pack auto|generic|<id>] [--terminal <id|label>] [--facts-only] [--depth N] [--full] [--refresh] [--out .uai/analysis]`
+- Example: `/uai-analyze PROCESSO-EXEMPLO`
+- Example: `/uai-analyze JOB-BATCH-01 --audience both --trace both --mode autonomous --full`
+- Example: `/uai-analyze PROCESSO-EXEMPLO --domain-pack generic --terminal PR_EXEMPLO`
+- Example: `/uai-analyze PROCESSO-EXEMPLO --facts-only`
 
 ## Inputs
 - seed (required): Funcionalidade, job, programa, tabela, campo, tela, stored procedure ou dataset a ser analisado.

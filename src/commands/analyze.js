@@ -12,6 +12,7 @@ const batchFlow = require('../model/batch-flow');
 const functionalFlow = require('../model/functional-flow');
 const dossier = require('../model/dossier');
 const narrative = require('../model/narrative');
+const semanticInfer = require('../model/semantic-infer');
 const structurizr = require('../exporters/structurizr');
 
 const cmd = new Command('analyze');
@@ -23,7 +24,7 @@ cmd
   .option('--seed-type <type>', 'tipo preferencial do seed: feature | batch | program | table | field | screen | dataset | procedure')
   .option('--trace <mode>', 'direcao do rastreamento: forward | reverse | both', 'both')
   .option('--mode <mode>', 'modo da analise: autonomous | single-pass', 'autonomous')
-  .option('--domain-pack <pack>', 'acelerador de dominio: auto | generic | cessao-c3', 'auto')
+  .option('--domain-pack <pack>', 'acelerador de dominio: auto | generic | <id de .uai/domain-packs>', 'auto')
   .option('--terminal <idOrLabel>', 'prioriza um terminal de negocio no reverse trace')
   .option('--facts-only', 'limita o dossie a fatos com citacao navegavel')
   .option('--depth <n>', 'profundidade maxima do recorte', '4')
@@ -33,6 +34,7 @@ cmd
   .option('--json', 'saida resumida em JSON')
   .option('--no-bootstrap', 'nao executa ingest/model/map/verify automaticamente quando faltarem artefatos')
   .option('--narrative', 'enriquece o dossie com regras nomeadas, contingencias e user story via LLM (requer ANTHROPIC_API_KEY)')
+  .option('--infer', 'propoe significado para itens abaixo do alvo de confianca via LLM, ancorado em citacao (requer ANTHROPIC_API_KEY)')
   .action(async (seed, opts) => {
     if (!opts.json) {
       log.title('UAI Analyze');
@@ -68,6 +70,7 @@ cmd
 
     const batchFlows = loadJsonIfExists(manifest.modelPath('maps', 'batch-flow.json')) || batchFlow.build(model.entities, model.relations);
     const functionalFlows = loadJsonIfExists(manifest.modelPath('maps', 'functional-flows.json')) || functionalFlow.build(model.entities, model.relations, { batchFlow: batchFlows });
+    const analysisConfig = (() => { try { return manifest.readConfig() || {}; } catch (_) { return {}; } })();
     const analysis = dossier.build(model, seed, {
       audience,
       seedType: opts.seedType,
@@ -78,6 +81,7 @@ cmd
       factsOnly: opts.factsOnly,
       depth: opts.depth,
       full: opts.full,
+      confidenceTarget: analysisConfig.confidence_target,
       batchFlows,
       functionalFlows,
     });
@@ -93,6 +97,13 @@ cmd
       if (narrativeResult.inferred_errors && narrativeResult.inferred_errors.length > 0 && analysis.errors.length === 0) {
         analysis.errors = narrativeResult.inferred_errors;
       }
+    }
+
+    if (opts.infer) {
+      if (!opts.json) log.step('Inferindo significado para itens abaixo do alvo (LLM)...');
+      const inferResult = await semanticInfer.infer(analysis.verification_queue || []);
+      analysis.llm_inferences = inferResult.inferences || [];
+      if (inferResult.warning && !opts.json) log.warn(inferResult.warning);
     }
 
     const outDir = path.resolve(opts.out, analysis.slug);
@@ -220,6 +231,15 @@ function writePackage(outDir, analysis, manifestData, audience, narrativeResult)
   write('traceability.md', sourceMap.sanitizeText(dossier.renderTraceabilityMarkdown(analysis), manifestData));
 
   write('gaps.md', sourceMap.sanitizeText(dossier.renderGapsMarkdown(analysis), manifestData));
+  write('verification-queue.json', JSON.stringify(sanitizeDeep({
+    generated_at: analysis.generated_at,
+    seed: analysis.seed,
+    confidence_coverage: analysis.confidence_coverage,
+    items: analysis.verification_queue || [],
+  }, manifestData), null, 2));
+  if (analysis.llm_inferences && analysis.llm_inferences.length > 0) {
+    write('llm-inferences.json', JSON.stringify(sanitizeDeep(analysis.llm_inferences, manifestData), null, 2));
+  }
   write('evidence.json', JSON.stringify(sanitizeDeep(buildEvidencePayload(analysis), manifestData), null, 2));
   write('score.json', JSON.stringify(sanitizeDeep(analysis.score, manifestData), null, 2));
   write('quality-gate.json', JSON.stringify(sanitizeDeep(analysis.quality_gate, manifestData), null, 2));

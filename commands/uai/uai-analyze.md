@@ -3,7 +3,7 @@ id: uai-analyze
 description: Gera um dossie autonomo de funcionalidade com foco em fluxo, fases, evidencias, gaps e diagramas.
 category: command
 mode: wrapper
-usage: "<seed> [--audience tech|business|both] [--seed-type <type>] [--trace forward|reverse|both] [--mode autonomous|single-pass] [--domain-pack auto|generic|cessao-c3] [--terminal <id|label>] [--facts-only] [--depth N] [--full] [--refresh] [--out .uai/analysis]"
+usage: "<seed> [--audience tech|business|both] [--seed-type <type>] [--trace forward|reverse|both] [--mode autonomous|single-pass] [--domain-pack auto|generic|<id>] [--terminal <id|label>] [--facts-only] [--depth N] [--full] [--refresh] [--out .uai/analysis]"
 inputs:
   - name: seed
     required: true
@@ -73,9 +73,9 @@ next_commands:
   - uai-verify
   - uai-feature-flow
 examples:
-  - /uai-analyze TERMO-CESSAO
-  - /uai-analyze CNAB600 --audience both --trace both --mode autonomous --full
-  - /uai-analyze TERMO-CESSAO --domain-pack cessao-c3 --terminal PR_TERMO_CESSAO_ASSINA
-  - /uai-analyze TERMO-CESSAO --facts-only
+  - /uai-analyze PROCESSO-EXEMPLO
+  - /uai-analyze JOB-BATCH-01 --audience both --trace both --mode autonomous --full
+  - /uai-analyze PROCESSO-EXEMPLO --domain-pack generic --terminal PR_EXEMPLO
+  - /uai-analyze PROCESSO-EXEMPLO --facts-only
 ---
 Use este comando quando a unidade principal de trabalho for uma funcionalidade e a saida desejada for um dossie autonomo, rastreavel e orientado a modernizacao.

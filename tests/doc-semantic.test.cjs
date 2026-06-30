@@ -32,45 +32,45 @@ test('doc command generates conceptual dossiers and folder indexes', { concurren
   const sourceRoot = path.join(tmpDir, 'legacy');
   fs.mkdirSync(sourceRoot, { recursive: true });
 
-  const frec1r1o = [
+  const pgm1r1o = [
     ff('IDENTIFICATION DIVISION.'),
     ff('OBJETIVO : MENU - IDADE', '*'),
-    ff('PROGRAM-ID. FREC1R1O.'),
-    ff('FRECR1TM - ROTINA AUXILIAR', '*'),
+    ff('PROGRAM-ID. PGM1R1O.'),
+    ff('PGMR1TM - ROTINA AUXILIAR', '*'),
     ff('PROCEDURE DIVISION.'),
-    ff("CALL 'BRAD0660'."),
-    ff("CALL 'BRAD0660'."),
-    ff("CALL 'POOL5005'."),
-    ff("CALL 'POOL5005'."),
+    ff("CALL 'UTIL0660'."),
+    ff("CALL 'UTIL0660'."),
+    ff("CALL 'UTILP5005'."),
+    ff("CALL 'UTILP5005'."),
     ff('GOBACK.'),
   ].join('\n');
 
-  const frec5245 = [
+  const pgm5245 = [
     ff('IDENTIFICATION DIVISION.'),
-    ff('PROGRAM-ID. FREC5245.'),
+    ff('PROGRAM-ID. PGM5245.'),
     ff('PROCEDURE DIVISION.'),
     ff('EXEC SQL'),
-    ff('SELECT COD_TERMO'),
-    ff('FROM DB2PRD.TMOD_TERMO_CSSAO'),
+    ff('SELECT COD_PEDIDO'),
+    ff('FROM DB2PRD.TB_MODELO'),
     ff('END-EXEC.'),
     ff('EXEC SQL'),
-    ff("UPDATE DB2PRD.TMOD_TERMO_CSSAO SET STATUS = 'A'"),
+    ff("UPDATE DB2PRD.TB_MODELO SET STATUS = 'A'"),
     ff('END-EXEC.'),
     ff('GOBACK.'),
   ].join('\n');
 
-  const freca224 = [
-    '//* *** GERA RELATORIO TERMO DE CESSAO',
-    '//FRECA224 JOB (ACCT),CLASS=A',
-    '//* EMITE TERMO DE CESSAO PARA ENVIO',
-    '//EMITE    EXEC PGM=FREC5245',
-    '//ARQENT   DD  DSN=MX.TERMO.ENTRADA,DISP=SHR',
-    '//ARQSAI   DD  DSN=MX.TERMO.SAIDA,DISP=NEW',
+  const pgma224 = [
+    '//* *** GERA RELATORIO PEDIDO DE VENDA',
+    '//PGMA224 JOB (ACCT),CLASS=A',
+    '//* EMITE PEDIDO DE VENDA PARA ENVIO',
+    '//EMITE    EXEC PGM=PGM5245',
+    '//ARQENT   DD  DSN=MX.PEDIDO.ENTRADA,DISP=SHR',
+    '//ARQOUT   DD  DSN=MX.PEDIDO.SAIDA,DISP=NEW',
   ].join('\n');
 
-  fs.writeFileSync(path.join(sourceRoot, 'FREC1R1O.cbl'), frec1r1o, 'latin1');
-  fs.writeFileSync(path.join(sourceRoot, 'FREC5245.cbl'), frec5245, 'latin1');
-  fs.writeFileSync(path.join(sourceRoot, 'FRECA224.jcl'), freca224, 'latin1');
+  fs.writeFileSync(path.join(sourceRoot, 'PGM1R1O.cbl'), pgm1r1o, 'latin1');
+  fs.writeFileSync(path.join(sourceRoot, 'PGM5245.cbl'), pgm5245, 'latin1');
+  fs.writeFileSync(path.join(sourceRoot, 'PGMA224.jcl'), pgma224, 'latin1');
 
   runNode(repoRoot, tmpDir, ['init', '-y', '-n', 'UAI Semantic Doc', '-s', sourceRoot]);
   runNode(repoRoot, tmpDir, ['ingest']);
@@ -78,9 +78,9 @@ test('doc command generates conceptual dossiers and folder indexes', { concurren
   runNode(repoRoot, tmpDir, ['map']);
   runNode(repoRoot, tmpDir, ['doc']);
 
-  const programDoc = fs.readFileSync(path.join(tmpDir, '.uai', 'docs', 'programs', 'FREC1R1O.md'), 'utf-8');
-  const jobDoc = fs.readFileSync(path.join(tmpDir, '.uai', 'docs', 'jobs', 'FRECA224.md'), 'utf-8');
-  const tableDoc = fs.readFileSync(path.join(tmpDir, '.uai', 'docs', 'data-lineage', 'DB2PRD.TMOD_TERMO_CSSAO.md'), 'utf-8');
+  const programDoc = fs.readFileSync(path.join(tmpDir, '.uai', 'docs', 'programs', 'PGM1R1O.md'), 'utf-8');
+  const jobDoc = fs.readFileSync(path.join(tmpDir, '.uai', 'docs', 'jobs', 'PGMA224.md'), 'utf-8');
+  const tableDoc = fs.readFileSync(path.join(tmpDir, '.uai', 'docs', 'data-lineage', 'DB2PRD.TB_MODELO.md'), 'utf-8');
   const programIndex = fs.readFileSync(path.join(tmpDir, '.uai', 'docs', 'programs', 'index.md'), 'utf-8');
   const jobIndex = fs.readFileSync(path.join(tmpDir, '.uai', 'docs', 'jobs', 'index.md'), 'utf-8');
   const tableIndex = fs.readFileSync(path.join(tmpDir, '.uai', 'docs', 'data-lineage', 'index.md'), 'utf-8');
@@ -90,24 +90,24 @@ test('doc command generates conceptual dossiers and folder indexes', { concurren
   assert.match(programDoc, /Papel observado: entrada\/menu/);
   assert.match(programDoc, /## Evidencias/);
   assert.match(programDoc, /## Relacoes de baixa confianca/);
-  assert.match(programDoc, /FRECR1TM/);
+  assert.match(programDoc, /PGMR1TM/);
   const callSection = programDoc.match(/### Chama([\s\S]*?)(?:\n### |\n## )/);
   assert.ok(callSection);
-  assert.equal((callSection[1].match(/BRAD0660/g) || []).length, 1);
-  assert.equal((callSection[1].match(/POOL5005/g) || []).length, 1);
+  assert.equal((callSection[1].match(/UTIL0660/g) || []).length, 1);
+  assert.equal((callSection[1].match(/UTILP5005/g) || []).length, 1);
 
-  assert.match(jobDoc, /GERA RELATORIO TERMO DE CESSAO/);
-  assert.match(jobDoc, /EMITE TERMO DE CESSAO PARA ENVIO/);
+  assert.match(jobDoc, /GERA RELATORIO PEDIDO DE VENDA/);
+  assert.match(jobDoc, /EMITE PEDIDO DE VENDA PARA ENVIO/);
   assert.match(jobDoc, /## Participa destes fluxos/);
 
   assert.match(tableDoc, /## Papel no sistema/);
   assert.match(tableDoc, /compartilhado entre consulta e manutencao/i);
-  assert.match(tableDoc, /FRECA224/);
+  assert.match(tableDoc, /PGMA224/);
 
   assert.match(programIndex, /papel observavel de um programa COBOL/i);
-  assert.match(programIndex, /\[FREC1R1O\]/);
+  assert.match(programIndex, /\[PGM1R1O\]/);
   assert.match(jobIndex, /job JCL como unidade batch/i);
-  assert.match(jobIndex, /\[FRECA224\]/);
+  assert.match(jobIndex, /\[PGMA224\]/);
   assert.match(tableIndex, /papel observavel de uma tabela/i);
-  assert.match(tableIndex, /\[DB2PRD.TMOD_TERMO_CSSAO\]/);
+  assert.match(tableIndex, /\[DB2PRD.TB_MODELO\]/);
 });

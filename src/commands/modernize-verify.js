@@ -21,7 +21,7 @@ cmd
   .option('--target <id>', 'stack alvo do blueprint: azure-java-aks', 'azure-java-aks')
   .option('--strategy <mode>', 'estrategia de transicao: strangler', 'strangler')
   .option('--profile <mode>', 'perfil do fluxo: auto | batch | online | hybrid', 'auto')
-  .option('--domain-pack <pack>', 'domain pack usado no bootstrap da analise: auto | generic | cessao-c3', 'auto')
+  .option('--domain-pack <pack>', 'domain pack usado no bootstrap da analise: auto | generic | <id de .uai/domain-packs>', 'auto')
   .option('--facts-only', 'limita a base de analise a fatos com citacao navegavel')
   .option('--refresh', 'regera o blueprint antes de comparar com o alvo')
   .option('--json', 'saida resumida em JSON')

@@ -1,0 +1,20 @@
+# Glossário local (opcional) — torna os nomes de domínio legíveis.
+#
+# A detecção ancorada em dados nomeia cada bounded context pelo substantivo do
+# agregado nos nomes de tabela (ex.: "VENDA", "PEDIDO"). Este glossário mapeia essas
+# abreviações para nomes de negócio legíveis. É LOCAL do seu projeto (fica em
+# .uai/glossary.yaml, ignorado pelo git) — nada do seu sistema entra no UAI.
+#
+# Copie para .uai/glossary.yaml e preencha conforme o seu domínio. Sem glossário,
+# o UAI usa o próprio token do agregado.
+#
+# Formato: ABREVIACAO: nome-legivel   (a chave é o token como aparece no nome da tabela)
+
+glossary:
+  # Exemplos genéricos — substitua pelos termos do SEU sistema:
+  VENDA:    vendas
+  PEDIDO:   pedidos
+  CLIENTE:  clientes
+  ITEM:     itens
+  CTA:      contas
+  EMPR:     empresas

@@ -12,6 +12,7 @@ const procedure    = require('../extractors/cobol-procedure');
 const normalizer   = require('../model/normalizer');
 const callResolver = require('../model/call-resolver');
 const dataContract = require('../model/data-contract');
+const datasetLinker = require('../model/dataset-linker');
 
 const cmd = new Command('model');
 
@@ -63,10 +64,15 @@ cmd
     const resolveResult = callResolver.resolve(entArray, relArray, flowsDir);
     const relArrayResolved = resolveResult.relations;
 
+    // ── Phase 10: link logical files to JCL physical datasets ──────────────────
+    log.step('Vinculando arquivos lógicos a DSNs físicos...');
+    const linkResult = datasetLinker.link(entArray, relArrayResolved);
+    const relArrayLinked = linkResult.relations;
+
     // ── Phase 11: USING clause → DATA_CONTRACT ───────────────────────────────
     log.step('Construindo contratos de dados (USING)...');
-    const contracts    = dataContract.buildContracts(entArray, relArrayResolved);
-    const relArrayFull = dataContract.mergeContracts(relArrayResolved, contracts);
+    const contracts    = dataContract.buildContracts(entArray, relArrayLinked);
+    const relArrayFull = dataContract.mergeContracts(relArrayLinked, contracts);
     const contractsOut = path.join(modelDir, 'contracts.json');
 
     const relFinalSorted = relArrayFull.sort((a, b) =>
@@ -110,6 +116,7 @@ cmd
     log.step(`Entidades inferidas    : ${inferredIds.length}`);
     log.step(`Relacoes unicas        : ${relFinalSorted.length}`);
     log.step(`Calls dinamicos resolv.: ${resolveResult.resolved}`);
+    log.step(`Linhagens de dados vinc: ${linkResult.linked}`);
     log.step(`Contratos de dados     : ${contracts.length}`);
     log.step(`Fluxos COBOL gerados   : ${flowArtifacts.generated}`);
     log.info('');

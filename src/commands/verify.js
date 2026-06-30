@@ -8,6 +8,7 @@ const log      = require('../utils/logger');
 const manifest = require('../utils/manifest');
 const scanner  = require('../extractors/scanner');
 const sourceMap = require('../utils/source-map');
+const { DEFAULT_TARGET, confidenceBasis } = require('../model/confidence');
 
 const cmd = new Command('verify');
 
@@ -15,6 +16,8 @@ cmd
   .description('Mede cobertura, confianca e lacunas do modelo')
   .option('--json',      'saida em JSON')
   .option('--deadcode',  'listar apenas programas candidatos a codigo morto')
+  .option('--target <n>', 'limiar de confianca alvo (0..1)', String(DEFAULT_TARGET))
+  .option('--strict',    'falha (exit 1) se a cobertura de confianca < alvo')
   .action((opts) => {
     if (!opts.json) {
       log.title('UAI Verify');
@@ -25,11 +28,14 @@ cmd
 
     const { entities, relations } = model;
 
+    const cfg = manifest.readConfig() || {};
+    const target = resolveTarget(opts.target, cfg.confidence_target);
+
     // Load file inventory
     const csvPath = manifest.modelPath('inventory', 'files.csv');
     const files   = scanner.readCsv(csvPath);
 
-    const report  = buildReport(entities, relations, files);
+    const report  = buildReport(entities, relations, files, null, target);
 
     // --deadcode: focused output of isolated programs
     if (opts.deadcode) {
@@ -46,8 +52,11 @@ cmd
       return;
     }
 
+    const meetsTarget = report.confidence_coverage.coverage_pct >= Math.round(target * 100);
+
     if (opts.json) {
       console.log(JSON.stringify(report, null, 2));
+      if (opts.strict && !meetsTarget) process.exit(1);
       return;
     }
 
@@ -65,6 +74,10 @@ cmd
     const gaps = buildGaps(entities, relations, files);
     fs.writeFileSync(path.join(reportsDir, 'gaps.json'), JSON.stringify(gaps, null, 2));
 
+    // Write reports/verification-queue.json — cada elemento < alvo, com file:line.
+    const queue = buildVerificationQueue(report, target);
+    fs.writeFileSync(path.join(reportsDir, 'verification-queue.json'), JSON.stringify(queue, null, 2));
+
     // Print summary
     log.success('Relatorio de cobertura gerado');
     log.info('');
@@ -75,13 +88,37 @@ cmd
     log.info('  .uai/VERIFY.md');
     log.info('  .uai/reports/coverage.json');
     log.info('  .uai/reports/gaps.json');
+    log.info('  .uai/reports/verification-queue.json');
 
     manifest.appendState('uai-verify', 'ok');
+
+    if (opts.strict && !meetsTarget) {
+      log.info('');
+      log.error(`Cobertura de confianca ${report.confidence_coverage.coverage_pct}% < alvo ${Math.round(target * 100)}% (--strict)`);
+      process.exit(1);
+    }
   });
+
+function resolveTarget(optTarget, configTarget) {
+  const fromOpt = optTarget !== undefined ? Number(optTarget) : NaN;
+  if (Number.isFinite(fromOpt) && fromOpt > 0 && fromOpt <= 1) return fromOpt;
+  const fromCfg = Number(configTarget);
+  if (Number.isFinite(fromCfg) && fromCfg > 0 && fromCfg <= 1) return fromCfg;
+  return DEFAULT_TARGET;
+}
+
+function buildVerificationQueue(report, target) {
+  return {
+    generated_at: report.generated_at,
+    confidence_target: target,
+    total: report.confidence_coverage.below_target.length,
+    items: report.confidence_coverage.below_target,
+  };
+}
 
 // ---------------------------------------------------------------------------
 
-function buildReport(entities, relations, files, manifestOrSources = null) {
+function buildReport(entities, relations, files, manifestOrSources = null, target = DEFAULT_TARGET) {
   const now = new Date().toISOString();
 
   // File counts by dialect
@@ -122,6 +159,8 @@ function buildReport(entities, relations, files, manifestOrSources = null) {
 
   const filesWithEntities = countFilesWithEntities(files, entities, manifestOrSources);
 
+  const confidenceCoverage = buildConfidenceCoverage(entities, relations, files, target, manifestOrSources);
+
   // Hotspots: programs sorted by caller count (fan-in)
   const callerCount = {};
   for (const rel of relations.filter(r => r.rel === 'CALLS' || r.rel === 'CALLS_PROC')) {
@@ -157,6 +196,7 @@ function buildReport(entities, relations, files, manifestOrSources = null) {
       low_confidence:  lowRels,
       with_evidence: withEvidence,
     },
+    confidence_coverage: confidenceCoverage,
     coverage: {
       files_with_entities:   filesWithEntities,
       file_coverage_pct:     pct(filesWithEntities, totalFiles),
@@ -169,6 +209,71 @@ function buildReport(entities, relations, files, manifestOrSources = null) {
       isolated_programs: isolated.map(p => p.name).slice(0, 50),
       hotspots,
     },
+  };
+}
+
+function buildConfidenceCoverage(entities, relations, files, target, manifestOrSources = null) {
+  const targetPct = Math.round(target * 100);
+  const elements = [
+    ...entities.map(e => normalizeElement(e, 'entity', manifestOrSources)),
+    ...relations.map(r => normalizeElement(r, 'relation', manifestOrSources)),
+  ];
+
+  const total = elements.length;
+  const meets = elements.filter(el => el.confidence >= target);
+  const below = elements.filter(el => el.confidence < target);
+
+  // Quebra por tipo (entidade.type / relation.rel) e por dialeto (extractor).
+  const byType = {};
+  const byDialect = {};
+  for (const el of elements) {
+    const tKey = el.kind === 'entity' ? el.type : `rel:${el.type}`;
+    byType[tKey] = byType[tKey] || { total: 0, meets: 0 };
+    byType[tKey].total += 1;
+    if (el.confidence >= target) byType[tKey].meets += 1;
+
+    const dKey = el.extractor || 'unknown';
+    byDialect[dKey] = byDialect[dKey] || { total: 0, meets: 0 };
+    byDialect[dKey].total += 1;
+    if (el.confidence >= target) byDialect[dKey].meets += 1;
+  }
+  for (const bucket of [byType, byDialect]) {
+    for (const key of Object.keys(bucket)) {
+      bucket[key].coverage_pct = pct(bucket[key].meets, bucket[key].total);
+    }
+  }
+
+  return {
+    target,
+    coverage_pct: pct(meets.length, total),
+    meets_target: meets.length,
+    below_target_count: below.length,
+    by_type: byType,
+    by_dialect: byDialect,
+    // Lista priorizada (menor confiança primeiro), limitada para não explodir o JSON.
+    below_target: below
+      .sort((a, b) => a.confidence - b.confidence)
+      .slice(0, 500),
+    summary: `${pct(meets.length, total)}% dos ${total} elementos atingem o alvo de ${targetPct}%`,
+  };
+}
+
+function normalizeElement(record, kind, manifestOrSources) {
+  const confidence = typeof record.confidence === 'number' ? record.confidence : 0;
+  const where = kind === 'entity'
+    ? (record.files && record.files[0] ? `${record.files[0]}:${record.line || ''}` : '')
+    : (Array.isArray(record.evidence) && record.evidence[0] ? record.evidence[0] : '');
+  return {
+    kind,
+    id: kind === 'entity' ? record.id : `${record.rel}:${record.from_id}->${record.to_id}`,
+    type: kind === 'entity' ? record.type : record.rel,
+    label: kind === 'entity' ? (record.label || record.name) : `${record.from_label || record.from} → ${record.to_label || record.to}`,
+    confidence,
+    confidence_basis: confidenceBasis(record),
+    extractor: record.extractor || null,
+    where: sourceMap.sanitizeText(where, manifestOrSources),
+    ...(record.inferred && { inferred: true }),
+    ...(record.dynamic && { dynamic: true }),
   };
 }
 
@@ -220,6 +325,7 @@ function buildVerifyMd(report) {
     `| Media (≥ 0.5) | ${r.entities.confidence.medium} |`,
     `| Baixa (< 0.5) | ${r.entities.confidence.low} |`,
     '',
+    ...(r.confidence_coverage ? buildConfidenceCoverageMd(r.confidence_coverage) : []),
     '## Cobertura',
     '',
     `- Arquivos com entidades identificadas : ${r.coverage.files_with_entities} / ${r.files.total}`,
@@ -261,6 +367,23 @@ function buildVerifyMd(report) {
   return lines.join('\n');
 }
 
+function buildConfidenceCoverageMd(cc) {
+  const targetPct = Math.round(cc.target * 100);
+  const lines = [
+    `## Cobertura de Confianca (alvo ${targetPct}%)`,
+    '',
+    `- Elementos no alvo : **${cc.coverage_pct}%** (${cc.meets_target} no alvo, ${cc.below_target_count} abaixo)`,
+    '',
+    '| Dialeto | No alvo | Total | % |',
+    '|---------|---------|-------|---|',
+    ...Object.entries(cc.by_dialect).sort().map(([d, v]) => `| ${d} | ${v.meets} | ${v.total} | ${v.coverage_pct}% |`),
+    '',
+    '> Elementos abaixo do alvo: ver `.uai/reports/verification-queue.json`.',
+    '',
+  ];
+  return lines;
+}
+
 function countFilesWithEntities(files, entities, manifestOrSources = null) {
   const entityFiles = new Set(entities.flatMap(e => e.files || []));
   return files.filter(f => entityFiles.has(sourceMap.sanitizePath(f.path, manifestOrSources))).length;
@@ -277,6 +400,10 @@ function printSummary(r) {
   log.step(`Relacoes mapeadas      : ${r.relations.total}`);
   log.step(`Cobertura de arquivos  : ${r.coverage.file_coverage_pct}%`);
   log.step(`Confianca alta         : ${r.entities.confidence.high}/${r.entities.total} entidades`);
+  if (r.confidence_coverage) {
+    const cc = r.confidence_coverage;
+    log.step(`Cobertura de confianca : ${cc.coverage_pct}% >= ${Math.round(cc.target * 100)}% (${cc.below_target_count} abaixo do alvo)`);
+  }
   log.info('');
   if (r.insights.entry_points.length > 0) {
     log.step(`Pontos de entrada (${r.insights.entry_points.length}): ${r.insights.entry_points.slice(0, 5).join(', ')}...`);

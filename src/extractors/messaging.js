@@ -3,31 +3,48 @@
 /**
  * messaging.js — Extractor for external protocol layout files.
  *
- * Detects files that describe messaging layouts used in inter-system communication:
- *   - CIP/C3 ACCC messages: ACCC013, ACCC014, ACCC031, ACCC032, ACCC420
- *   - CNAB layouts: CNAB240, CNAB400, CNAB500
- *   - CVM351 (B3 NF-e) and similar financial protocol layouts
- *   - GARQ/SCC3 gateway layouts
+ * Detecta arquivos que descrevem layouts de mensageria entre sistemas. Os
+ * padrões padrão cobrem apenas PADRÕES PÚBLICOS (ex.: CNAB) e marcadores
+ * estruturais genéricos. Códigos de mensagem específicos de um projeto NÃO
+ * ficam no fonte — podem ser fornecidos pelo usuário em
+ * `.uai/messaging-patterns.json` (filename, content, sends), mantendo o UAI
+ * genérico e sem vazar vocabulário de nenhum projeto.
  *
- * Produces entities of type `message_layout` and relations:
- *   - SENDS (program → message_layout)
- *   - RECEIVES (message_layout → program)
- *
- * These entities bridge the CIP external system gap in the analysis graph,
- * making ACCC message cycles visible to the UAI dossier pipeline.
+ * Produz entidades `message_layout` e relações SENDS (program → message_layout).
  */
 
 const fs = require('fs');
 const path = require('path');
 
-// Filename patterns that identify message layout files
-const MESSAGING_FILENAME_RE = /\b(ACCC\d{3}|CNAB[245]\d{2}|CVM351|GARQ|SCC3)\b/i;
+// Padrões PÚBLICOS/genéricos por padrão (CNAB é layout bancário público).
+const DEFAULT_FILENAME_RE = /\b(CNAB[245]\d{2}|LAYOUT|REMESSA|RETORNO|MSG)\b/i;
+const DEFAULT_CONTENT_RE = /\b(CNAB\s*(240|400|500)|MESSAGE\s+LAYOUT|RECORD\s+LAYOUT|LAYOUT\s+DE\s+(ARQUIVO|REGISTRO|MENSAGEM))\b/i;
+const DEFAULT_SENDS_RE = null; // sem heurística específica de envio por padrão
 
-// Content patterns that identify messaging layout content
-const MESSAGING_CONTENT_RE = /\b(ACCC0(13|14|31|32|20)|CNAB\s*(240|400|500)|CVM[\s-]?351|SCC3GRAD|GARQ2000|ARQSAI\d{2}|ARQSAI\d{4}|MFRM1\d{2})\b/i;
+// Padrões adicionais do projeto (opcionais, fora do fonte).
+const projectPatterns = loadProjectPatterns();
+const MESSAGING_FILENAME_RE = mergeRe(DEFAULT_FILENAME_RE, projectPatterns.filename);
+const MESSAGING_CONTENT_RE = mergeRe(DEFAULT_CONTENT_RE, projectPatterns.content);
+const SENDS_RE = projectPatterns.sends ? safeRe(projectPatterns.sends) : DEFAULT_SENDS_RE;
 
-// Relation hint patterns: which programs SEND messages
-const SENDS_RE = /\b(PLAN2440|GARQ2000|SCC3GRAD)\b/i;
+function loadProjectPatterns() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join('.uai', 'messaging-patterns.json'), 'utf-8'));
+    return { filename: raw.filename || null, content: raw.content || null, sends: raw.sends || null };
+  } catch (_) {
+    return { filename: null, content: null, sends: null };
+  }
+}
+
+function safeRe(source) {
+  try { return new RegExp(source, 'i'); } catch (_) { return null; }
+}
+
+function mergeRe(base, extraSource) {
+  const extra = extraSource ? safeRe(extraSource) : null;
+  if (!extra) return base;
+  return new RegExp(`(?:${base.source})|(?:${extra.source})`, 'i');
+}
 
 function extract(filePath, fileHash) {
   const filename = path.basename(filePath).toUpperCase();
@@ -65,7 +82,7 @@ function extract(filePath, fileHash) {
     const line = lines[i];
     const lineRef = `${filePath}:${i + 1}`;
 
-    const sendsMatch = line.match(SENDS_RE);
+    const sendsMatch = SENDS_RE ? line.match(SENDS_RE) : null;
     if (sendsMatch) {
       const programName = sendsMatch[0].toUpperCase();
       relations.push({
@@ -112,10 +129,8 @@ function deriveLayoutName(filename, lines) {
 }
 
 function deriveProtocol(filename, content) {
-  if (/ACCC\d{3}/.test(filename) || /ACCC0(13|14|31|32)/.test(content)) return 'cip-c3';
+  // CNAB é um padrão público de layout bancário — único protocolo nomeado.
   if (/CNAB[245]\d{2}/.test(filename) || /CNAB\s*(240|400|500)/.test(content)) return 'cnab';
-  if (/CVM[\s-]?351/.test(content)) return 'cvm351-b3';
-  if (/GARQ|SCC3/.test(filename)) return 'garq-scc3';
   return 'messaging';
 }
 

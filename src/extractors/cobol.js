@@ -3,6 +3,11 @@
 const fs       = require('fs');
 const path     = require('path');
 const { readFileAuto } = require('../utils/encoding');
+const sqlAst   = require('./sql-ast');
+
+// Campos de status/situação (segmentos delimitados por - ou _). Usado para
+// detectar MOVE 'literal' TO <status> e reconstruir a máquina de estados.
+const STATUS_FIELD_RE = /(?:^|[-_])(SITUAC[A-Z]*|SITUACAO|STATUS|ESTADO|FASE|ETAPA|SIT|ST)(?:[-_]|$)/;
 
 /**
  * COBOL fixed-format extractor.
@@ -26,8 +31,17 @@ function extract(filePath, fileHash) {
   let inExecSql  = false;
   let sqlLines   = [];
   let sqlStart   = 0;
+  let inExecCics = false;
+  let cicsLines  = [];
+  let cicsStart  = 0;
   let inProcedureDivision = false;
   let pendingSemanticDescription = null;
+  const sqlStatements = []; // blocos EXEC SQL completos, p/ reconstruir host-structs por uso
+  // Guard tracking (heurístico) p/ SETS_STATE: condição IF/EVALUATE que envolve o MOVE.
+  let guardStack = [];          // [{cond, negated}]
+  let evalWhen = null;          // condição WHEN corrente do EVALUATE
+  let prevEndedSentence = false; // a linha anterior terminou a sentença (ponto) → fecha escopo
+  let currentGuard = null;
 
   for (let i = 0; i < lines.length; i++) {
     const raw     = lines[i].replace(/\r$/, '');
@@ -79,9 +93,16 @@ function extract(filePath, fileHash) {
 
     // EXEC SQL / END-EXEC handling
     if (upper.startsWith('EXEC SQL')) {
-      inExecSql  = true;
-      sqlStart   = lineNum;
-      sqlLines   = [upper];
+      if (upper.includes('END-EXEC')) {
+        if (programId) {
+          extractEmbeddedSql(upper, programId, filePath, lineNum, fileHash, entities, relations);
+          sqlStatements.push({ text: upper, line: lineNum });
+        }
+      } else {
+        inExecSql  = true;
+        sqlStart   = lineNum;
+        sqlLines   = [upper];
+      }
       continue;
     }
     if (inExecSql) {
@@ -91,10 +112,39 @@ function extract(filePath, fileHash) {
         const sqlText = sqlLines.join(' ');
         if (programId) {
           extractEmbeddedSql(sqlText, programId, filePath, sqlStart, fileHash, entities, relations);
+          sqlStatements.push({ text: sqlText, line: sqlStart });
         }
         sqlLines = [];
       } else {
         sqlLines.push(upper);
+      }
+      continue;
+    }
+
+    // EXEC CICS / END-EXEC handling
+    if (upper.startsWith('EXEC CICS')) {
+      if (upper.includes('END-EXEC')) {
+        if (programId) {
+          extractEmbeddedCics(upper, programId, filePath, lineNum, fileHash, entities, relations);
+        }
+      } else {
+        inExecCics = true;
+        cicsStart  = lineNum;
+        cicsLines  = [upper];
+      }
+      continue;
+    }
+    if (inExecCics) {
+      if (upper.includes('END-EXEC')) {
+        inExecCics = false;
+        cicsLines.push(upper);
+        const cicsText = cicsLines.join(' ');
+        if (programId) {
+          extractEmbeddedCics(cicsText, programId, filePath, cicsStart, fileHash, entities, relations);
+        }
+        cicsLines = [];
+      } else {
+        cicsLines.push(upper);
       }
       continue;
     }
@@ -118,6 +168,54 @@ function extract(filePath, fileHash) {
 
     if (!programId) continue;
 
+    // ── Guard tracking p/ máquina de estados (condição que envolve cada SETS_STATE) ──
+    if (inProcedureDivision) {
+      if (prevEndedSentence) { guardStack = []; evalWhen = null; prevEndedSentence = false; }
+      // Cabeçalho de parágrafo/section (Area A) reinicia o escopo de condição.
+      if (raw[7] !== ' ' && /^[A-Z0-9][A-Z0-9-]*(\s+SECTION)?\s*\.?\s*$/.test(upper)) {
+        guardStack = []; evalWhen = null;
+      }
+      if (/^EVALUATE\b/.test(upper)) evalWhen = null;
+      const whenM = upper.match(/^WHEN\s+(.+?)\s*$/);
+      if (whenM && !/^WHEN\s+OTHER\b/.test(upper)) evalWhen = whenM[1].slice(0, 60);
+      if (/\bEND-EVALUATE\b/.test(upper)) evalWhen = null;
+      const endIfs = (upper.match(/\bEND-IF\b/g) || []).length;
+      for (let k = 0; k < endIfs && guardStack.length; k++) guardStack.pop();
+      if (/^ELSE\b/.test(upper) && guardStack.length) {
+        const top = guardStack[guardStack.length - 1];
+        top.negated = !top.negated;
+      }
+      if (/^IF\b/.test(upper)) guardStack.push({ cond: extractIfCondition(upper), negated: false });
+      currentGuard = computeGuard(guardStack, evalWhen);
+      prevEndedSentence = upper.endsWith('.');
+    }
+
+    // SELECT file ASSIGN TO ddname
+    const selectMatch = upper.match(/\bSELECT\s+([A-Z0-9@#$-]+)\s+ASSIGN\s+(?:TO\s+)?(?:'|")?([A-Z0-9@#$-]+)/);
+    if (selectMatch && !COBOL_RESERVED.has(selectMatch[1])) {
+      const rawDd = selectMatch[2];
+      const ddName = rawDd.replace(/^(UT-[SD]-|DA-[SD]-|UT-|DA-)/i, '').trim();
+      relations.push(makeRel('ASSIGNS_TO', programId, ddName, filePath, lineNum, 1.0, fileHash, {
+        fromType: 'program',
+        toType:   'ddname',
+        file_internal: selectMatch[1],
+        ddname: ddName,
+      }));
+      continue;
+    }
+
+    // MQ PUT/GET handling
+    const mqMatch = upper.match(/\bCALL\s+['"](MQPUT|MQGET)['"]/);
+    if (mqMatch) {
+      const isPut = mqMatch[1] === 'MQPUT';
+      relations.push(makeRel(isPut ? 'EMITS' : 'RECEIVES', programId, 'MQ_QUEUE', filePath, lineNum, 0.8, fileHash, {
+        fromType: 'program',
+        toType:   'queue',
+        api:      mqMatch[1],
+      }));
+      continue;
+    }
+
     // CALL 'PROG' or CALL "PROG" or CALL identifier (variable — lower confidence)
     const callLit = upper.match(/\bCALL\s+['"]([A-Z0-9@#$-]+)['"]/);
     if (callLit) {
@@ -137,12 +235,16 @@ function extract(filePath, fileHash) {
       continue;
     }
 
-    // COPY copybook
-    const copyMatch = upper.match(/\bCOPY\s+([A-Z0-9@#$-]+)/);
+    // COPY copybook [REPLACING ...]
+    const copyMatch = upper.match(/\bCOPY\s+([A-Z0-9@#$-]+)(?:\s+REPLACING\s+(?:==)?([A-Z0-9@#$-]+)(?:==)?\s+BY\s+(?:==)?([A-Z0-9@#$-]+)(?:==)?)?/);
     if (copyMatch) {
-      relations.push(makeRel('INCLUDES', programId, copyMatch[1], filePath, lineNum, 1.0, fileHash, {
+      const copybookName = copyMatch[1];
+      const replaceFrom = copyMatch[2] || null;
+      const replaceTo = copyMatch[3] || null;
+      relations.push(makeRel('INCLUDES', programId, copybookName, filePath, lineNum, 1.0, fileHash, {
         fromType: 'program',
         toType:   'copybook',
+        ...(replaceFrom && replaceTo && { replaces: { from: replaceFrom, to: replaceTo } }),
       }));
       continue;
     }
@@ -161,6 +263,19 @@ function extract(filePath, fileHash) {
         }));
       }
       continue;
+    }
+
+    // MOVE 'literal' TO status-field → SETS_STATE (base da máquina de estados).
+    // Captura o valor literal atribuído a um campo de status/situação — é assim
+    // que se reconstrói o catálogo de estados (ex.: status do recebível).
+    const moveStateMatch = upper.match(/\bMOVE\s+['"]([A-Z0-9 #@$.-]{1,12})['"]\s+TO\s+([A-Z][A-Z0-9@#$-]{1,29})\b/);
+    if (moveStateMatch && STATUS_FIELD_RE.test(moveStateMatch[2])) {
+      relations.push(makeRel('SETS_STATE', programId, moveStateMatch[2], filePath, lineNum, 0.9, fileHash, {
+        fromType: 'program',
+        toType:   'field',
+        value:    moveStateMatch[1].trim(),
+        ...(currentGuard && { guard: currentGuard }),
+      }));
     }
 
     // MOVE field-a TO field-b → TRANSFORMS relation for lineage
@@ -215,15 +330,132 @@ function extract(filePath, fileHash) {
     }
   }
 
+  // Reconstrói o layout dos host-structs DB2 (DCLGEN) a partir do uso —
+  // parea a lista de colunas do cursor/SELECT com a lista de campos host do
+  // FETCH/SELECT INTO. Recupera as colunas mesmo quando o copybook não veio no export.
+  if (programId) {
+    reconstructHostStructs(sqlStatements, programId, filePath, fileHash, entities, relations);
+  }
+
   return { entities, relations };
+}
+
+/**
+ * Reconstrói o layout de host-structs DB2 (campo host ← coluna da tabela) a partir
+ * do uso em SQL embarcado, sem precisar do copybook/DCLGEN. Pareia posicionalmente:
+ *   - DECLARE <cur> CURSOR FOR SELECT <cols> FROM <tab>  +  FETCH <cur> INTO <hosts>
+ *   - SELECT <cols> INTO <hosts> FROM <tab>              (singleton)
+ * Emite a entidade copybook (resolution=reconstructed) e os campos com a coluna de origem.
+ */
+function reconstructHostStructs(sqlStatements, programId, filePath, fileHash, entities, relations) {
+  const cursors = new Map(); // cursorName → { columns:[], table, line }
+  const pairings = [];        // { columns:[], hosts:[], table, line }
+
+  for (const stmt of sqlStatements) {
+    const t = String(stmt.text || '').replace(/\bEND-EXEC\b.*$/, '').trim();
+
+    // DECLARE <cur> CURSOR FOR SELECT <cols> FROM <table>
+    const decl = t.match(/\bDECLARE\s+([A-Z][A-Z0-9-]*)\s+CURSOR\s+(?:WITH\s+\w+\s+)?FOR\s+SELECT\b([\s\S]*?)\bFROM\s+([A-Z][A-Z0-9_#@$.]+)/);
+    if (decl) {
+      cursors.set(decl[1], { columns: splitSqlList(decl[2]), table: decl[3], line: stmt.line });
+      continue;
+    }
+    // FETCH <cur> INTO <hosts>
+    const fetch = t.match(/\bFETCH\s+(?:NEXT\s+FROM\s+)?([A-Z][A-Z0-9-]*)\s+INTO\b([\s\S]*)$/);
+    if (fetch && cursors.has(fetch[1])) {
+      const cur = cursors.get(fetch[1]);
+      pairings.push({ columns: cur.columns, hosts: splitSqlList(fetch[2]), table: cur.table, line: cur.line });
+      continue;
+    }
+    // SELECT <cols> INTO <hosts> FROM <table>  (singleton)
+    const singleton = t.match(/\bSELECT\b([\s\S]*?)\bINTO\b([\s\S]*?)\bFROM\s+([A-Z][A-Z0-9_#@$.]+)/);
+    if (singleton) {
+      pairings.push({ columns: splitSqlList(singleton[1]), hosts: splitSqlList(singleton[2]), table: singleton[3], line: stmt.line });
+    }
+  }
+
+  // struct → Map(field → { column, table }) — dedup por campo, 1ª ocorrência vence.
+  const structs = new Map();
+  for (const p of pairings) {
+    if (!p.columns.length || p.columns.length !== p.hosts.length) continue; // só pareia 1:1 confiável
+    for (let i = 0; i < p.hosts.length; i++) {
+      const hv = parseHostVar(p.hosts[i]);
+      if (!hv || !hv.struct) continue; // só host-vars qualificados (:STRUCT.FIELD)
+      const col = String(p.columns[i] || '').replace(/^[A-Z0-9_#@$.]*\./, '').trim(); // tira alias.
+      if (!col || SQL_RESERVED.has(col)) continue;
+      if (!structs.has(hv.struct)) structs.set(hv.struct, { fields: new Map(), table: p.table, line: p.line });
+      const s = structs.get(hv.struct);
+      if (!s.fields.has(hv.field)) s.fields.set(hv.field, { column: col, table: p.table });
+    }
+  }
+
+  for (const [structName, s] of structs) {
+    if (s.fields.size === 0) continue;
+    entities.push({
+      kind: 'entity', type: 'copybook', name: structName,
+      file: filePath, line: s.line, confidence: 0.8, extractor: 'cobol', fileHash,
+      resolution: 'reconstructed_from_usage', source_table: s.table,
+    });
+    let order = 0;
+    for (const [field, info] of s.fields) {
+      order++;
+      entities.push({
+        kind: 'entity', type: 'field', name: field, parent: structName, parentType: 'copybook',
+        level: 5, order, source_column: info.column, source_table: info.table,
+        file: filePath, line: s.line, confidence: 0.8, confidence_basis: 'reconstructed_from_usage',
+        source: 'usage', extractor: 'cobol', fileHash,
+      });
+    }
+  }
+}
+
+// Divide uma lista SQL ("a, b, c") em itens limpos, ignorando parênteses de função simples.
+function splitSqlList(text) {
+  return String(text || '')
+    .split(',')
+    .map(s => s.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+// Parseia um host-var qualificado ":STRUCT.FIELD" (ignora indicador ":x:ind").
+function parseHostVar(item) {
+  const m = String(item || '').match(/:?\s*([A-Z][A-Z0-9-]*)\s*\.\s*([A-Z][A-Z0-9-]*)/);
+  if (!m) return null;
+  return { struct: m[1], field: m[2] };
 }
 
 // ---------------------------------------------------------------------------
 // Embedded SQL extraction
 // ---------------------------------------------------------------------------
 
+// Extrai as colunas do WHERE (lado esquerdo dos predicados `COL = :host`/`COL =`).
+function extractWhereKeys(upper) {
+  const m = upper.match(/\bWHERE\b([\s\S]+?)(?:\bGROUP\b|\bORDER\b|\bHAVING\b|END-EXEC|$)/);
+  if (!m) return [];
+  const keys = [];
+  const re = /([A-Z][A-Z0-9_#@$]{1,30})\s*=/g;
+  let k;
+  while ((k = re.exec(m[1])) !== null) {
+    const col = k[1];
+    if (!SQL_RESERVED.has(col) && !keys.includes(col)) keys.push(col);
+  }
+  return keys.slice(0, 8);
+}
+
 function extractEmbeddedSql(sqlText, programId, filePath, lineNum, fileHash, entities, relations) {
   const upper = sqlText.toUpperCase();
+
+  // EXEC SQL INCLUDE <book> — copybook/host-struct DB2 (DCLGEN). Não tem FROM/INTO
+  // de tabela; registra a inclusão e encerra (a reconstrução do layout vem do uso).
+  const incMatch = upper.match(/\bINCLUDE\s+([A-Z][A-Z0-9@#$-]{1,30})\b/);
+  if (incMatch && !SQL_RESERVED.has(incMatch[1])) {
+    relations.push(makeRel('INCLUDES', programId, incMatch[1], filePath, lineNum, 1.0, fileHash, {
+      fromType: 'program',
+      toType:   'copybook',
+      via:      'sql-include',
+    }));
+    return;
+  }
 
   const patterns = [
     { regex: /\bFROM\s+([A-Z][A-Z0-9_#@$.]{0,28})/g, rel: 'READS' },
@@ -231,6 +463,9 @@ function extractEmbeddedSql(sqlText, programId, filePath, lineNum, fileHash, ent
     { regex: /\bUPDATE\s+([A-Z][A-Z0-9_#@$.]{0,28})/g, rel: 'UPDATES' },
     { regex: /\bDELETE\s+FROM\s+([A-Z][A-Z0-9_#@$.]{0,28})/g, rel: 'READS' },
   ];
+
+  // Colunas-chave do WHERE (sinal para o brief/doc: "SQL em TABELA com chave …").
+  const whereKeys = extractWhereKeys(upper);
 
   const seen = new Set();
   for (const { regex, rel } of patterns) {
@@ -242,8 +477,19 @@ function extractEmbeddedSql(sqlText, programId, filePath, lineNum, fileHash, ent
         relations.push(makeRel(rel, programId, tbl, filePath, lineNum, 0.9, fileHash, {
           fromType: 'program',
           toType:   'table',
+          ...(whereKeys.length > 0 && { keys: whereKeys }),
         }));
       }
+    }
+  }
+
+  // Relacionamentos tabela↔tabela do SQL embarcado (JOIN ... ON) via parser AST —
+  // é onde mora a maior parte da base relacional em COBOL legado.
+  const ast = sqlAst.extractRelationships(sqlText, filePath, fileHash);
+  for (const astRel of ast.relations) {
+    if (astRel.rel === 'RELATES_TO') {
+      astRel.line = lineNum;
+      relations.push(astRel);
     }
   }
 
@@ -282,6 +528,23 @@ function extractEmbeddedSql(sqlText, programId, filePath, lineNum, fileHash, ent
 
 function makeEntity(type, name, file, line, confidence, fileHash) {
   return { kind: 'entity', type, name, file, line, confidence, extractor: 'cobol', fileHash };
+}
+
+// Verbos COBOL que marcam o fim da condição num IF inline (IF cond <verbo> ...).
+const COBOL_VERB_RE = /\b(MOVE|PERFORM|ADD|SUBTRACT|MULTIPLY|DIVIDE|COMPUTE|GO\s+TO|GOBACK|DISPLAY|ACCEPT|CALL|SET|INITIALIZE|READ|WRITE|REWRITE|DELETE|OPEN|CLOSE|STRING|UNSTRING|CONTINUE|STOP|NEXT\s+SENTENCE|EXEC)\b/;
+
+function extractIfCondition(line) {
+  const after = String(line).replace(/^IF\s+/, '');
+  const vm = after.search(COBOL_VERB_RE);
+  let cond = vm >= 0 ? after.slice(0, vm) : after;
+  return cond.replace(/\s+THEN\s*$/i, '').replace(/[.\s]+$/, '').replace(/\s+/g, ' ').trim();
+}
+
+function computeGuard(stack, evalWhen) {
+  const parts = stack.map(g => g.cond ? (g.negated ? `NOT (${g.cond})` : g.cond) : null).filter(Boolean);
+  if (evalWhen) parts.push(`WHEN ${evalWhen}`);
+  if (parts.length === 0) return null;
+  return parts.slice(-3).join(' AND ').slice(0, 120);
 }
 
 function makeRel(rel, from, to, file, line, confidence, fileHash, extra = {}) {
@@ -418,5 +681,36 @@ const SQL_RESERVED = new Set([
   'END-EXEC', 'INCLUDE', 'WHENEVER', 'SQLERROR', 'CONTINUE', 'STOP',
   'SQLCODE', 'SQLSTATE', 'SQLCA', 'USING', 'RETURNING', 'OUTPUT',
 ]);
+
+function extractEmbeddedCics(cicsText, programId, filePath, lineNum, fileHash, entities, relations) {
+  const upper = cicsText.toUpperCase();
+
+  const linkMatch = upper.match(/\bLINK\s+PROGRAM\s*\(\s*['"]?([A-Z0-9@#$-]+)['"]?\s*\)/i);
+  if (linkMatch) {
+    relations.push(makeRel('CALLS', programId, linkMatch[1], filePath, lineNum, 1.0, fileHash, {
+      fromType: 'program',
+      toType:   'program',
+      via:      'cics-link',
+    }));
+  }
+
+  const startMatch = upper.match(/\bSTART\s+TRANSID\s*\(\s*['"]?([A-Z0-9@#$-]+)['"]?\s*\)/i);
+  if (startMatch) {
+    relations.push(makeRel('TRANSITIONS_TO', programId, startMatch[1], filePath, lineNum, 0.9, fileHash, {
+      fromType: 'program',
+      toType:   'transaction',
+      via:      'cics-start',
+    }));
+  }
+
+  const returnMatch = upper.match(/\bRETURN\s+TRANSID\s*\(\s*['"]?([A-Z0-9@#$-]+)['"]?\s*\)/i);
+  if (returnMatch) {
+    relations.push(makeRel('TRANSITIONS_TO', programId, returnMatch[1], filePath, lineNum, 0.9, fileHash, {
+      fromType: 'program',
+      toType:   'transaction',
+      via:      'cics-return',
+    }));
+  }
+}
 
 module.exports = { extract };

@@ -49,6 +49,6 @@ next_commands:
   - uai-modernize-verify
   - uai-doc
 examples:
-  - /uai-modernization-flow TERMO-DE-CESSAO
+  - /uai-modernization-flow PROCESSO-EXEMPLO
 ---
 Use este workflow quando a resposta desejada for entender o legado e sair com um plano operacional de modernizacao em Azure + Java, sem depender de desenho manual separado.

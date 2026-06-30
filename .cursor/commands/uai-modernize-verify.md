@@ -8,8 +8,8 @@ Compara o blueprint de modernizacao com um repositorio Java/Azure alvo e aponta 
 Execute the UAI wrapper command `uai-modernize-verify` using the repo-local engine.
 ## Invocation
 - Usage: `/uai-modernize-verify <seed> --target-repo <path> [--target azure-java-aks] [--strategy strangler] [--profile auto|batch|online|hybrid] [--refresh] [--out .uai/modernization/<slug>/target-verify]`
-- Example: `/uai-modernize-verify TERMO-DE-CESSAO --target-repo ./apps/term-service`
-- Example: `/uai-modernize-verify CNAB600 --target-repo ../modernized-cnab --refresh`
+- Example: `/uai-modernize-verify PROCESSO-EXEMPLO --target-repo ./apps/exemplo-service`
+- Example: `/uai-modernize-verify JOB-BATCH-01 --target-repo ../modernized-app --refresh`
 
 ## Inputs
 - seed (required): Funcionalidade ou recorte cujo blueprint de modernizacao sera validado.

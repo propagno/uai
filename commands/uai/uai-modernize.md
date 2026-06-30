@@ -3,7 +3,7 @@ id: uai-modernize
 description: Gera um blueprint deterministico de modernizacao Azure + Java a partir do dossie legado.
 category: command
 mode: wrapper
-usage: "<seed> [--target azure-java-aks] [--strategy strangler] [--profile auto|batch|online|hybrid] [--domain-pack auto|generic|cessao-c3] [--facts-only] [--refresh] [--out .uai/modernization]"
+usage: "<seed> [--target azure-java-aks] [--strategy strangler] [--profile auto|batch|online|hybrid] [--domain-pack auto|generic|<id>] [--facts-only] [--refresh] [--out .uai/modernization]"
 inputs:
   - name: seed
     required: true
@@ -62,8 +62,8 @@ next_commands:
   - uai-modernize-verify
   - uai-doc
 examples:
-  - /uai-modernize TERMO-DE-CESSAO
-  - /uai-modernize CNAB600 --target azure-java-aks --strategy strangler --profile batch
-  - /uai-modernize TERMO-DE-CESSAO --domain-pack cessao-c3 --facts-only
+  - /uai-modernize PROCESSO-EXEMPLO
+  - /uai-modernize JOB-BATCH-01 --target azure-java-aks --strategy strangler --profile batch
+  - /uai-modernize PROCESSO-EXEMPLO --domain-pack generic --facts-only
 ---
 Use este comando quando o objetivo nao for apenas entender o legado, mas converte-lo em um blueprint operacional de modernizacao para Azure + Java com coexistencia controlada.

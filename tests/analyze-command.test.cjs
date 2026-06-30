@@ -123,12 +123,12 @@ test('analyze prefers a functional cluster over a weak exact entity and emits ad
   fs.mkdirSync(sourceRoot, { recursive: true });
 
   const job = [
-    '//* PROCESSA TERMO DE CESSAO',
-    '//TERMO001 JOB',
-    '//* GERA TERMO DE CESSAO',
+    '//* PROCESSA PEDIDO DE VENDA',
+    '//PEDIDO001 JOB',
+    '//* GERA PEDIDO DE VENDA',
     '//STEP1   EXEC PGM=TRMMAIN',
-    '//IN1     DD DSN=TERM.CESSAO.IN,DISP=SHR',
-    '//OUT1    DD DSN=TERM.CESSAO.OUT,DISP=NEW',
+    '//IN1     DD DSN=TERM.VENDA.IN,DISP=SHR',
+    '//OUT1    DD DSN=TERM.VENDA.OUT,DISP=NEW',
   ].join('\n');
 
   const cobolMain = [
@@ -137,9 +137,9 @@ test('analyze prefers a functional cluster over a weak exact entity and emits ad
     ff('DATA DIVISION.'),
     ff('PROCEDURE DIVISION.'),
     ff("CALL 'TRMSUB'."),
-    ff('READ ARQ-TERMO.'),
+    ff('READ ARQ-PEDIDO.'),
     ff("IF WS-STATUS = 'ER'"),
-    ff("   DISPLAY 'TERMO DE CESSAO INVALIDO'"),
+    ff("   DISPLAY 'PEDIDO DE VENDA INVALIDO'"),
     ff('END-IF.'),
     ff('WRITE ARQ-SAIDA.'),
     ff('GOBACK.'),
@@ -147,31 +147,31 @@ test('analyze prefers a functional cluster over a weak exact entity and emits ad
 
   const vb6Form = [
     'VERSION 5.00',
-    'Begin VB.Form FrmTermo',
+    'Begin VB.Form FrmPedido',
     'End',
     'Private Sub CmdAssinar_Click()',
-    '  cn.CommandText = "PR_TERMO_CESSAO_ASSINA"',
-    '  Open "termo_cessao_assinado.txt" For Output As #1',
+    '  cn.CommandText = "PR_PROC"',
+    '  Open "proc_exemplo_assinado.txt" For Output As #1',
     'End Sub',
   ].join('\n');
 
   const sqlText = [
-    'CREATE PROCEDURE PR_TERMO_CESSAO_ASSINA',
+    'CREATE PROCEDURE PR_PROC',
     'AS',
     'BEGIN',
-    '  UPDATE TB_TERMO_CESSAO SET MODE = 1;',
+    '  UPDATE TB_PEDIDO SET MODE = 1;',
     'END',
   ].join('\n');
 
-  fs.writeFileSync(path.join(sourceRoot, 'TERMO001.jcl'), job, 'latin1');
+  fs.writeFileSync(path.join(sourceRoot, 'PEDIDO001.jcl'), job, 'latin1');
   fs.writeFileSync(path.join(sourceRoot, 'TRMMAIN.cbl'), cobolMain, 'latin1');
-  fs.writeFileSync(path.join(sourceRoot, 'FrmTermo.frm'), vb6Form, 'latin1');
-  fs.writeFileSync(path.join(sourceRoot, 'PR_TERMO_CESSAO_ASSINA.sql'), sqlText, 'utf-8');
+  fs.writeFileSync(path.join(sourceRoot, 'FrmPedido.frm'), vb6Form, 'latin1');
+  fs.writeFileSync(path.join(sourceRoot, 'PR_PROC.sql'), sqlText, 'utf-8');
 
   runNode(repoRoot, tmpDir, ['init', '-y', '-n', 'UAI Resolution', '-s', sourceRoot]);
-  runNode(repoRoot, tmpDir, ['analyze', 'termo-de-cessao', '--audience', 'both', '--mode', 'autonomous', '--trace', 'both']);
+  runNode(repoRoot, tmpDir, ['analyze', 'processo-exemplo', '--audience', 'both', '--mode', 'autonomous', '--trace', 'both']);
 
-  const analysisDir = path.join(tmpDir, '.uai', 'analysis', 'termo-de-cessao');
+  const analysisDir = path.join(tmpDir, '.uai', 'analysis', 'processo-exemplo');
   const evidence = JSON.parse(fs.readFileSync(path.join(analysisDir, 'evidence.json'), 'utf-8'));
   const resolution = JSON.parse(fs.readFileSync(path.join(analysisDir, 'resolution.json'), 'utf-8'));
   const qualityGate = JSON.parse(fs.readFileSync(path.join(analysisDir, 'quality-gate.json'), 'utf-8'));

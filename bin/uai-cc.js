@@ -28,6 +28,7 @@ program.addCommand(require('../src/commands/lineage'));
 
 // Documentacao e cobertura
 program.addCommand(require('../src/commands/doc'));
+program.addCommand(require('../src/commands/scaffold'));
 program.addCommand(require('../src/commands/executive'));
 program.addCommand(require('../src/commands/verify'));
 program.addCommand(require('../src/commands/sync-commands'));

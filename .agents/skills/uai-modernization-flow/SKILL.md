@@ -7,7 +7,7 @@ Mode: workflow
 Executa o fluxo recomendado de analise funcional e blueprint de modernizacao Azure + Java.
 ## Invocation
 - Usage: `/uai-modernization-flow <feature|job|programa|tabela|dataset>`
-- Example: `/uai-modernization-flow TERMO-DE-CESSAO`
+- Example: `/uai-modernization-flow PROCESSO-EXEMPLO`
 
 ## Inputs
 - arguments (required): Seed funcional a ser analisado e convertido em blueprint.

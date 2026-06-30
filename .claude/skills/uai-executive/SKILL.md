@@ -8,8 +8,8 @@ Gera uma visao executiva do sistema ou de um recorte especifico em Markdown com 
 ## Invocation
 - Usage: `/uai-executive [query] [--scope system|focused|both] [--format mermaid|structurizr|both] [--depth N] [--timeout 30s] [--full] [--out .uai/docs/executive]`
 - Example: `/uai-executive`
-- Example: `/uai-executive "Termo de Cessao"`
-- Example: `/uai-executive "NFE CNAB400" --scope both --format both --full`
+- Example: `/uai-executive "Processo Exemplo"`
+- Example: `/uai-executive "Relatorio Batch" --scope both --format both --full`
 - Example: `/uai-executive "PROCESSAMENTO" --scope focused --format mermaid --depth 2`
 
 ## Inputs
